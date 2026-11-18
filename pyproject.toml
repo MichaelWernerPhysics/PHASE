@@ -1,0 +1,127 @@
+[project]
+name = "PHASE"
+# The version is defined once, as __version__ in src/phase/__init__.py. CITATION.cff has to match it (checked by tests/test_package.py).
+dynamic = ["version"]
+description = "Numerical phase shifts of light-pulse atom interferometers"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Michael Werner", email = "werner@iqo.uni-hannover.de"}]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2",
+    "scipy>=1.16.0,<2",
+    "matplotlib>=3.10.3,<4",
+    "astropy>=7",
+    "obspy>=1.4.2,<2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "scipy-stubs>=1.16.2.0,<2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/phase/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/phase"]
+
+
+#------------------
+# pixi configuration
+#------------------
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[tool.pixi.dependencies]
+# The package supports Python >= 3.12 (tested up to 3.14), the development environment stays on 3.12.
+python = "3.12.*"
+# obspy and the numerical stack come from conda-forge as prebuilt binaries.
+obspy = ">=1.4.2,<2"
+numpy = ">=2"
+scipy = ">=1.16.0,<2"
+matplotlib-base = ">=3.10.3,<4"
+
+[tool.pixi.pypi-dependencies]
+phase = { path = ".", editable = true }
+
+[tool.pixi.environments]
+# The default environment includes the development tools (tests, linting, type checking).
+default = { features = ["dev"], solve-group = "default" }
+
+[tool.pixi.tasks]
+test = "pytest"
+tutorial = "python examples/phase_tutorial.py"
+lint = "ruff check src tests examples"
+typecheck = "mypy src tests examples"
+
+
+#------------------
+# pytest configuration
+#------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: tests that take several seconds (deselect with -m 'not slow')",
+]
+
+
+#------------------
+# mypy configuration
+#------------------
+[tool.mypy]
+strict_equality = true
+disallow_incomplete_defs = true
+# Also check the bodies of functions without annotations, and report type: ignore comments that are no longer needed.
+check_untyped_defs = true
+warn_unused_ignores = true
+explicit_package_bases = true
+mypy_path = "src"
+
+# astropy ships neither type stubs nor a py.typed marker.
+[[tool.mypy.overrides]]
+module = ["astropy.*"]
+ignore_missing_imports = true
+
+
+#------------------
+# ty configuration
+#------------------
+[tool.ty.environment]
+# Resolve third-party imports from the pixi env instead of the system Python selected in the editor.
+python = ".pixi/envs/default"
+
+
+#------------------
+# Ruff configuration
+#------------------
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Only lint rules: ruff format is not used, it would rewrite the keyword style "name = value".
+select = [
+    "B",    # bugbear
+    "E4",   # imports
+    "E7",   # statements
+    "E9",   # syntax errors
+    "F",    # pyflakes
+    "I",    # sorted imports
+    "UP",   # modern syntax for the target Python version
+    "W",    # trailing whitespace and the newline at the end of a file
+]
+
+[tool.ruff.lint.isort]
+# Keep the explicit re-exports "name as name" of the __init__ files in one import statement per module.
+combine-as-imports = true
+# phase is the package of this repository, also when ruff runs from the editor.
+known-first-party = ["phase"]

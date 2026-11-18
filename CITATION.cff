@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "PHASE: Numerical phase shifts of light-pulse atom interferometers"
+version: 0.1.0
+license: MIT
+authors:
+  - family-names: Werner
+    given-names: Michael
+    affiliation: "Leibniz Universität Hannover"
+identifiers:
+  - type: doi
+    value: 10.25835/jnh3eryx
+    description: "Earlier version of PHASE, used in: Atom interferometers in weakly curved spacetimes using Bragg diffraction and Bloch oscillations (M. Werner and K. Hammerer, 2023)."
+  - type: doi
+    value: 10.25835/7d8kyoz3
+    description: "Earlier version of PHASE, used in: Local measurement scheme of gravitational curvature using atom interferometers (M. Werner and K. Hammerer, 2024)."
+  - type: doi
+    value: 10.25835/xce7b1vd
+    description: "Earlier version of PHASE, used in: Terrestrial gravitational wave detection with atom interferometers (M. Werner, A. Alibabaei and N. Gaaloul, 2026)."
+  - type: doi
+    value: 10.25835/MHQX49EA
+    description: "Earlier version of PHASE, used in: Dual-species atom interferometry for axion dark matter (M. Reckermann et al., arXiv:2611.15874, 2026)."
