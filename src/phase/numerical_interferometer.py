@@ -513,6 +513,13 @@ def numerical_phases(
         """ +1 for light travelling up, -1 for light travelling down. Two-photon pulses and single photon pulses without direction (only allowed without the finite speed of light) count as +1. """
         return -1 if interaction_type[pulse] == "Single_Photon" and laser_direction[pulse] == "down" else 1
 
+    def laser_reference_height(pulse: int) -> Decimal:
+
+        """ Height the laser phase of the pulse refers to: The light carries the phase of the laser that emits it, i.e. the spatial kick phase is k (z - z_reference).
+        Light travelling down refers to the upper laser. Light travelling up refers to the lower laser, for two-photon pulses to the retro-reflection mirror.
+        With k measured from the origin z = 0 instead, the phase would depend on the choice of the origin as soon as k changes from pulse to pulse (Doppler tuning). """
+        return upper_laser_height if direction_sign(pulse = pulse) == -1 else lower_laser_height
+
     def single_photon_temporal_kick_phase(
         arm: str,  # "upper" or "lower"
         pulse: int,  # Index of the laser pulse (negative indices count from the last pulse).
@@ -759,9 +766,11 @@ def numerical_phases(
         )
 
         # Single photon pulses do not use the retro-reflection mirror: The mirror jitter only enters two-photon pulses.
-        k_vector_Doppler_corrected = k_effective * (1 - Decimal(doppler_shift / 2)) + recoil_frequency * Decimal(doppler_shift / c)
-        kick_phase_jitter += (2 * trans_momentum_upper_path[0] * k_vector_Doppler_corrected * jitter)
-        kick_phase_jitter += (-2 * trans_momentum_lower_path[0] * k_vector_Doppler_corrected * jitter)
+        # The mirror displacement x changes the path of the retro-reflected beam (laser 1) by 2 x, the direct beam (laser 2) is not affected.
+        # The phase changes by 2 k_1 x, i.e. by k_eff x for k_1 = k_2. Laser 1 is Doppler tuned with (1 + v / c), as in the temporal kick phase.
+        k_vector_reflected_beam = k_vector_1 * (1 + doppler_shift)
+        kick_phase_jitter += (2 * trans_momentum_upper_path[0] * k_vector_reflected_beam * jitter)
+        kick_phase_jitter += (-2 * trans_momentum_lower_path[0] * k_vector_reflected_beam * jitter)
 
     if laser_phase_noise_bool:
         # Two-photon pulses: The laser phase noise is taken at the emission time of the retro-reflected beam. The direct beam is emitted 2 (z_atom - z_mirror) / c later, this delay is neglected.
@@ -796,14 +805,14 @@ def numerical_phases(
         ).normalize()
     )
 
-    """ The first laser pulse will imprint a spatial phase on the atoms, which is given by Eq. (35). """
+    """ The first laser pulse will imprint a spatial phase on the atoms, which is given by Eq. (35), with the height measured from the laser, see laser_reference_height. """
     upper_spatial_kick_phase_list.append(
-        first_interaction_height.normalize()
+        (first_interaction_height - laser_reference_height(pulse = 0)).normalize()
         * first_spatial_kick_phase_laser_contribution_Doppler_corrected_upper.normalize()
         / hbar_over_m
     )
     lower_spatial_kick_phase_list.append(
-        first_interaction_height.normalize()
+        (first_interaction_height - laser_reference_height(pulse = 0)).normalize()
         * first_spatial_kick_phase_laser_contribution_Doppler_corrected_lower.normalize()
         / hbar_over_m
     )
@@ -1365,11 +1374,9 @@ def numerical_phases(
                 )
             )
 
-            k_vector_Doppler_corrected = k_effective * (
-                1 - Decimal(doppler_shift_upper / 2)
-            ) + recoil_frequency * Decimal(doppler_shift_upper / c)
+            k_vector_reflected_beam = k_vector_1 * (1 + doppler_shift_upper)
 
-            kick_phase_jitter += (2 * trans_momentum_upper_path[index + 1] * k_vector_Doppler_corrected * jitter)
+            kick_phase_jitter += (2 * trans_momentum_upper_path[index + 1] * k_vector_reflected_beam * jitter)
 
         if laser_phase_noise_bool:
             kick_phase_jitter += direction_sign(pulse = index + 1) * trans_momentum_upper_path[index + 1] * phase_noise(
@@ -1576,11 +1583,9 @@ def numerical_phases(
                 )
             )
 
-            k_vector_Doppler_corrected = k_effective * (
-                1 - Decimal(doppler_shift_lower / 2)
-            ) + recoil_frequency * Decimal(doppler_shift_lower / c)
+            k_vector_reflected_beam = k_vector_1 * (1 + doppler_shift_lower)
 
-            kick_phase_jitter += (- 2 * trans_momentum_lower_path[index + 1] * k_vector_Doppler_corrected * jitter)
+            kick_phase_jitter += (- 2 * trans_momentum_lower_path[index + 1] * k_vector_reflected_beam * jitter)
 
         if laser_phase_noise_bool:
             kick_phase_jitter += - direction_sign(pulse = index + 1) * trans_momentum_lower_path[index + 1] * phase_noise(
@@ -1610,14 +1615,14 @@ def numerical_phases(
             ).normalize()
         )
 
-        """ The next laser pulse will imprint a spatial phase on the atoms, which is given by Eq. (35) """
+        """ The next laser pulse will imprint a spatial phase on the atoms, which is given by Eq. (35), with the height measured from the laser, see laser_reference_height. """
         upper_spatial_kick_phase_list.append(
-            next_interaction_height_upper.normalize()
+            (next_interaction_height_upper - laser_reference_height(pulse = index + 1)).normalize()
             * next_spatial_kick_phase_laser_contribution_Doppler_corrected_upper.normalize()
             / hbar_over_m
         )
         lower_spatial_kick_phase_list.append(
-            next_interaction_height_lower.normalize()
+            (next_interaction_height_lower - laser_reference_height(pulse = index + 1)).normalize()
             * next_spatial_kick_phase_laser_contribution_Doppler_corrected_lower.normalize()
             / hbar_over_m
         )
@@ -2262,11 +2267,9 @@ def numerical_phases(
             )
         )
 
-        k_vector_Doppler_corrected = k_effective * (
-            1 - Decimal(doppler_shift_upper / 2)
-        ) + recoil_frequency * Decimal(doppler_shift_upper / c)
+        k_vector_reflected_beam = k_vector_1 * (1 + doppler_shift_upper)
         kick_phase_jitter += (
-            2 * trans_momentum_upper_path[-1] * k_vector_Doppler_corrected * jitter
+            2 * trans_momentum_upper_path[-1] * k_vector_reflected_beam * jitter
         )
 
     if laser_phase_noise_bool:
@@ -2494,11 +2497,9 @@ def numerical_phases(
             )
         )
 
-        k_vector_Doppler_corrected = k_effective * (
-            1 - Decimal(doppler_shift_lower / 2)
-        ) + recoil_frequency * Decimal(doppler_shift_lower / c)
+        k_vector_reflected_beam = k_vector_1 * (1 + doppler_shift_lower)
 
-        kick_phase_jitter += (- 2 * trans_momentum_lower_path[-1] * k_vector_Doppler_corrected * jitter)
+        kick_phase_jitter += (- 2 * trans_momentum_lower_path[-1] * k_vector_reflected_beam * jitter)
 
     if laser_phase_noise_bool:
         kick_phase_jitter += - direction_sign(pulse = -1) * trans_momentum_lower_path[-1] * phase_noise(
@@ -2527,14 +2528,14 @@ def numerical_phases(
         ).normalize()
     )
 
-    """ The last laser pulse will imprint a spatial phase on the atoms, which is given by Eq. (35) """
+    """ The last laser pulse will imprint a spatial phase on the atoms, which is given by Eq. (35), with the height measured from the laser, see laser_reference_height. """
     upper_spatial_kick_phase_list.append(
-        last_interaction_height_upper.normalize()
+        (last_interaction_height_upper - laser_reference_height(pulse = len(interaction_type) - 1)).normalize()
         * last_spatial_kick_phase_laser_contribution_Doppler_corrected_upper.normalize()
         / hbar_over_m
     )
     lower_spatial_kick_phase_list.append(
-        last_interaction_height_lower.normalize()
+        (last_interaction_height_lower - laser_reference_height(pulse = len(interaction_type) - 1)).normalize()
         * last_spatial_kick_phase_laser_contribution_Doppler_corrected_lower.normalize()
         / hbar_over_m
     )

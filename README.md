@@ -56,6 +56,8 @@ gradiometers, gravitational waves, laser phase noise, test masses, tides and gra
 
 - **Geometry:** Heights z point upwards and are given in m. The lasers are part of the `Interferometer`: the lower laser (or the retro-reflection mirror of two-photon pulses)
   sits at `lower_laser_height` (default -1 m), the upper laser one `baseline` (default 12 m) above it. Interferometers of a differential measurement share the lasers.
+  The laser phase refers to the laser that emits the light (the retro-reflection mirror for two-photon pulses), i.e. the kick phase does not depend on the choice of the origin.
+- **Reference height z = 0:** g (and Γ) are given at z = 0, and so is `clock_frequency`: An atom in the excited state at the height z sees the redshifted transition frequency.
 - **Gravity:** g > 0 points downwards. The model `"constant gradient"` uses g(z) = g - Γ z. The defaults are standard gravity, g = 9.80665 m/s², and the free-air gradient, Γ = 3.086e-6 1/s².
   Both can be passed to `numerical_phases` as `g` and `gravity_gradient`.
 - **Interferometer:** For P pulses, the momentum lists (in units of the photon momentum) and internal state lists of both arms have P + 1 entries (before, between and after the pulses),

@@ -7,6 +7,7 @@ The central check: A Mach-Zehnder interferometer (MZI) in a homogeneous gravitat
 Dividing the numerical phase by -N k T^2 therefore has to give back the local g of the gravitational model, up to small correction terms (finite speed of light, gravity gradients, ...).
 '''
 
+from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
 
@@ -635,18 +636,20 @@ def test_laser_phase_noise_sign_follows_absorption_and_emission(direction: str) 
     assert abs(noise - expected) < Decimal("1e-20")
 
 
-''' Mirror jitter: The retro-reflection mirror at the position x(t) shifts the phase of the two-photon pulses by 2 k x(t). The MZI combines them to 2 k (x(0) - 2 x(T) + x(2T)).
-Single photon pulses do not use the mirror. '''
-def test_mirror_jitter_is_imprinted_at_the_pulses() -> None:
+''' Mirror jitter: A displacement x(t) of the retro-reflection mirror changes the path of the retro-reflected beam by 2 x(t), the direct beam is not affected.
+The two-photon pulses pick up 2 k_1 x(t) (k_eff x(t) for k_1 = k_2 = k_eff / 2) and the MZI combines them to 2 k_1 (x(0) - 2 x(T) + x(2T)).
+Unequal beams show that only the k-vector of the retro-reflected beam (k_1) enters. Single photon pulses do not use the mirror. '''
+@pytest.mark.parametrize("k_1, k_2", [(k_raman / 2, k_raman / 2), (k_raman / 4, 3 * k_raman / 4)])
+def test_mirror_jitter_is_imprinted_at_the_pulses(k_1: Decimal, k_2: Decimal) -> None:
     T = Decimal(1)
     random_phases = np.random.default_rng(3).uniform(0, 2 * np.pi, len(gm.frequencies_and_amplitudes)).tolist()
-    interferometer = mzi(T, 1, "Two_Photon", k_vector = [k_raman / 2, k_raman / 2])
+    interferometer = mzi(T, 1, "Two_Photon", k_vector = [k_1, k_2])
     interferometer.noise = ["Mirror Jitter"]
     settings: dict[str, Any] = dict(interferometer = interferometer)
 
     noise = total_phase(random_phases_mirror_jitter = random_phases, **settings) - total_phase(**settings)
     position = [Decimal(gm.create_displacement_noise_at_time(random_phases = random_phases, time = time)) for time in (0, T, 2 * T)]
-    expected = 2 * k_raman * (position[0] - 2 * position[1] + position[2])
+    expected = 2 * k_1 * (position[0] - 2 * position[1] + position[2])
 
     assert expected != 0
     assert abs(noise - expected) < Decimal("1e-20")
@@ -738,6 +741,25 @@ def test_laser_geometry_of_the_interferometer_is_used() -> None:
     settings: dict[str, Any] = dict(initial_height = 0, initial_velocity = 10, include_internal_state_changes = True)
     assert numerical_phases(interferometer = clock_mzi_with_light_from_above(baseline = 12), **settings)[0] is not None
     assert numerical_phases(interferometer = clock_mzi_with_light_from_above(baseline = 5), **settings)[0] is None
+
+
+''' The laser phase refers to the laser that emits the light (the retro-reflection mirror for two-photon pulses), not to the origin z = 0. Shifting the lasers and the atoms together
+in a homogeneous field therefore leaves the kick phase unchanged, also with the Doppler tuning, where k changes from pulse to pulse. With k z measured from the origin, the kick phase
+of the Raman MZI changed by - k delta_z g^2 T^2 / c^2 (1.2e-7 rad for 7 m). '''
+@pytest.mark.parametrize("geometry", [
+    lambda lower: mach_zehnder(T = 1, k_vector = [k_raman / 2, k_raman / 2], lower_laser_height = lower),
+    lambda lower: mach_zehnder(T = 1, k_vector = k_clock, interaction_type = "Single_Photon", clock = True, direction = "Up", lower_laser_height = lower),
+    lambda lower: mach_zehnder(T = 1, k_vector = k_clock, interaction_type = "Single_Photon", clock = True, direction = "Down", lower_laser_height = lower),
+    lambda lower: create_MZI(time = Decimal("0.5"), diamonds = 2, N_LMT = 5, k_eff = k_clock, lower_laser_height = lower),
+], ids = ["two-photon", "single photon up", "single photon down", "multi-diamond LMT"])
+def test_kick_phase_does_not_depend_on_the_origin(geometry: Callable[[Decimal], Interferometer]) -> None:
+    shift = Decimal(7)
+    settings: dict[str, Any] = dict(initial_velocity = 10, include_FSL_contribution = True, include_Doppler_effect = True, include_internal_state_changes = True)
+
+    kick = numerical_phases(interferometer = geometry(Decimal(-1)), initial_height = 0, **settings)[2]
+    shifted_kick = numerical_phases(interferometer = geometry(Decimal(-1) + shift), initial_height = shift, **settings)[2]
+
+    assert abs(shifted_kick - kick) < Decimal("1e-25")
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
