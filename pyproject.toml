@@ -16,6 +16,10 @@ dependencies = [
     "obspy>=1.4.2,<2",
 ]
 
+[project.urls]
+Repository = "https://github.com/MicWer94/PHASE"
+Issues = "https://github.com/MicWer94/PHASE/issues"
+
 [dependency-groups]
 dev = [
     "pytest",

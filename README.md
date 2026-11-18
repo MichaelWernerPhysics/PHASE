@@ -92,7 +92,7 @@ gradiometers, gravitational waves, laser phase noise, test masses, tides and gra
 - Michael Werner (<werner@iqo.uni-hannover.de>): main author.
 - Maike Reckermann (Leibniz University Hannover): implementation of the atmospheric gravity gradient noise model.
 
-Contributions are welcome. Please open an issue or write an e-mail.
+Contributions are welcome. Please open an [issue](https://github.com/MicWer94/PHASE/issues) or write an e-mail.
 
 ## Citation
 
