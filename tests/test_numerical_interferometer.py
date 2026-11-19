@@ -604,6 +604,34 @@ def test_gravitational_wave_without_strain_changes_nothing():
     assert total_phase(gw = GravWave(frequency = 0.3, strain = 0), **settings) == total_phase(**settings)
 
 
+''' Absolute gravitational wave response of a gradiometer, set up as in Fig. 3 of Werner, Alibabaei and Gaaloul, "Terrestrial gravitational wave detection with atom interferometers":
+Sr clock transition (698 nm), Q = 5 diamonds, n = 1, T = 0.5 s, f = 1 Hz, both ensembles separated by L = 69.3274 m. The strain h sin(w t + pi/2) gives the full response on resonance,
+2 Q n k h L sinc(n w L / 2c) cos(w (n - 1) L / 2c) cos(w L / 2c). Both light directions give the same magnitude, the response has the opposite sign of the momentum transfer.
+The remaining relative deviation of 8e-8 does not depend on the time step. '''
+@pytest.mark.parametrize("direction, kick", [("Up", 1), ("Down", -1)])
+def test_gradiometer_gravitational_wave_response_matches_analytical_formula(direction: str, kick: int) -> None:
+    k_Sr = Decimal(2 * scp.pi / (698 * 10 ** -9))
+    T, Q, n, L, h, f = Decimal("0.5"), 5, 1, Decimal("69.3274"), 10 ** -15, 1
+    recoil_velocity = Decimal(scp.hbar) * k_Sr / (87 * Decimal(scp.m_p))
+    # Launch velocity g Q T (the atoms fall back after 2 Q T), reduced by the recoil of the first pulse along its kick direction, as in the code of the paper.
+    initial_velocity = Decimal("9.81") * Q * T - kick * recoil_velocity
+    settings: dict[str, Any] = dict(
+        interferometer = create_MZI(time = T, diamonds = Q, N_LMT = n, k_eff = k_Sr, lower_laser_height = -1, baseline = 102, direction = direction),
+        height_delta = L,
+        init_height = Decimal(0),
+        init_velocity = initial_velocity,
+        phase_output = "Propagation",
+        include_internal_state_changes = True,
+        time_discretization = 100,
+    )
+    response = numerical_same_interferometer_height_difference(gw = GravWave(frequency = f, strain = h), **settings) - numerical_same_interferometer_height_difference(**settings)
+
+    x = 2 * np.pi * f * float(L) / (2 * scp.speed_of_light)
+    analytical_response = 2 * Q * n * float(k_Sr) * h * float(L) * np.sin(n * x) / (n * x) * np.cos((n - 1) * x) * np.cos(x)
+
+    assert abs(- kick * float(response) / analytical_response - 1) < 1e-6
+
+
 ''' The GGN phases are drawn from the seed of the GGN_Noise_Model, so the same seed has to give the same noise realization. '''
 @pytest.mark.slow
 @pytest.mark.parametrize("model, noise_type", [("seismic", "NLNM"), ("atmospheric", "low")])

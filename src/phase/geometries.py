@@ -75,10 +75,11 @@ def create_MZI(
         N_LMT: int,
         k_eff: int | float | Decimal,
         lower_laser_height: Decimal | float | int = -1,
-        baseline: Decimal | float | int = 12
+        baseline: Decimal | float | int = 12,
+        direction: str = "Up"
     ) -> Interferometer:
 
-    """Creates a Mach-Zehnder type interferometer with time T, Q diamonds and periodic internal state changes, driven by single photon pulses from the lower laser.
+    """Creates a Mach-Zehnder type interferometer with time T, Q diamonds and periodic internal state changes, driven by single photon pulses.
     LMT is (here) included by imprinted n times the momentum in a single instant. It is left for future work to model LMT via individual light pulses, mainly because of its numerical cost.
 
     Args:
@@ -88,16 +89,24 @@ def create_MZI(
         k_eff (int | float | Decimal): k-vector of the single photon pulses. It also sets the clock frequency k_eff c.
         lower_laser_height (Decimal | float | int): Height of the lower laser in m.
         baseline (Decimal | float | int): Distance between the lower and the upper laser in m.
+        direction (str): Propagation direction of the light, "Up" (emitted by the lower laser, default) or "Down" (emitted by the upper laser).
+            The absorption g -> e kicks the atom along the light and the stimulated emission e -> g against it. With "Down", the momentum transfers therefore point down.
+            The laser at the top in Werner, Alibabaei and Gaaloul, "Terrestrial gravitational wave detection with atom interferometers" corresponds to "Down".
+            For the gradiometer of its Fig. 3, both directions give the same magnitude of the gravitational wave response (tests/test_numerical_interferometer.py).
     """
 
+    if direction not in ("Up", "Down"):
+        raise ValueError(f"The light direction has to be 'Up' or 'Down' (given: {direction!r}).")
+
+    sign = 1 if direction == "Up" else -1
     number_of_intervals = 2 * diamonds
 
     # One time interval between two consecutive pulses. The time after the last pulse is the detection_time of numerical_phases.
     time_intervals = [time] * number_of_intervals
 
     # Desired photon momenta within the interferometry paths
-    momentum_quanta_upper_path = [0] + [N_LMT, 0] * diamonds + [0]
-    momentum_quanta_lower_path = [0] + [0, N_LMT] * diamonds + [0]
+    momentum_quanta_upper_path = [0] + [sign * N_LMT, 0] * diamonds + [0]
+    momentum_quanta_lower_path = [0] + [0, sign * N_LMT] * diamonds + [0]
 
     # Ground or excited state: "g" = ground state, "e" = excited state
     # The first element in the list refers to the atomic state *prior* to the first interferometry laser.
@@ -117,8 +126,8 @@ def create_MZI(
         clock_frequency = Decimal(k_eff) * c,
         lower_laser_height = lower_laser_height,
         baseline = baseline,
-        # Light direction of each pulse: The absorption g -> e kicks the atom up and the stimulated emission e -> g kicks it down, i.e. the light travels up (from the lower laser).
-        single_photon_laser_direction = ["Up"] * (number_of_intervals + 1)
+        # Light direction of each pulse: The absorption g -> e kicks the atom along the light and the stimulated emission e -> g against it.
+        single_photon_laser_direction = [direction] * (number_of_intervals + 1)
     )
 
 

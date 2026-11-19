@@ -50,6 +50,20 @@ def test_mach_zehnder_kicks_along_the_light(direction: str, sign: int) -> None:
     assert interferometer.single_photon_laser_direction == [direction] * 3
 
 
+@pytest.mark.parametrize("direction, sign", [("Up", 1), ("Down", -1)])
+def test_create_MZI_kicks_along_the_light(direction: str, sign: int) -> None:
+    interferometer = create_MZI(time = 1, diamonds = 2, N_LMT = 3, k_eff = k_eff_Rb, direction = direction)
+
+    assert interferometer.upper_momentum == [0, 3 * sign, 0, 3 * sign, 0, 0]
+    assert interferometer.lower_momentum == [0, 0, 3 * sign, 0, 3 * sign, 0]
+    assert interferometer.single_photon_laser_direction == [direction] * 5
+
+
+def test_create_MZI_rejects_unknown_direction() -> None:
+    with pytest.raises(ValueError, match = "Up"):
+        create_MZI(time = 1, diamonds = 1, N_LMT = 1, k_eff = k_eff_Rb, direction = "Sideways")
+
+
 def test_two_photon_mach_zehnder_has_no_light_direction() -> None:
     interferometer = mach_zehnder(T = 1, k_vector = [k_eff_Rb / 2, k_eff_Rb / 2])
 
