@@ -354,7 +354,7 @@ def numerical_phases(
     GGN_noise: GGN_Noise_Model | None = None,
     # Reference height in m of the GGN model "underground", see gravity_gradient_noise_potential.
     z_offset: float = 10.0,
-    # Number of time steps of each free propagation between two pulses. The propagation phase and the trajectories are first order accurate in the time step, see below.
+    # Number of time steps of each free propagation between two pulses, see below.
     time_discretization: int = 1000
 ) -> list:
 
@@ -379,8 +379,9 @@ def numerical_phases(
 
     """ Number of time segments for each path of free propagation (argument time_discretization).
     Example: T = 1s, then each time step in the free propagation is 1ms, if time_discretization = 1000.
-    For most real life scenarios, a time_discretization of 1000 is sufficient. For local (!) gravitational anharmonicities, such as test masses, the error of the phase is of first order
-    in the time step: The test mass signal of a gradiometer can be off by a few percent for 1000 steps. Increase it or extrapolate 2 phi(2 n) - phi(n) in this case. """
+    The trajectories are exact in a homogeneous field and first order in the time step otherwise (with a gradient or test masses). The propagation phase integrates the Lagrangian
+    along each step (see action_per_mass): By the principle of stationary action, the error of the trajectories only enters to second order. 1000 steps resolve the gravity gradient term
+    to ~1e-9 and the signal of a test mass to ~1e-9 (relative). """
 
     """ Extract the effective k-vector for the two cases of a single photon, or a two-photon process."""
     k_vectors = interferometer.k_vector
@@ -913,8 +914,9 @@ def numerical_phases(
 
     """ We now propagate the atoms through the first interferometer path numerically.
     We do so by filling two lists for each path: One for the heights and one for the velocities.
-    A. The entries in height lists are given by [height, time_window], where time_window is the numerical length of each time step. By this one can approximate the propagation integral by step functions.
-    B. The entries in the velocity lists are given by the velocities at each time step.
+    A. The entries in height lists are given by [height, time_window, internal state]: the height at the end of a time step, the length of the step and the internal state during it.
+    B. The entries in the velocity lists are given by the velocities at the end of each time step.
+    The atoms start at initial_height with initial_velocity. The propagation phase integrates the Lagrangian along the steps, see action_per_mass.
 
     This is done in four steps:
     1. Write down the atomic position/velocity before the first atom-light interaction.
@@ -924,22 +926,23 @@ def numerical_phases(
 
     """ Define the form of the atomic trajectory and velocity lists.
     The velocity lists only store the atomic velocity on each path at each time step.
-    The trajectory lists store a three tuple of the form [height, time, internal state] including the initial height of a time interval, the length of the upcoming time interval and the internal state the atom is in during this time. """
+    The trajectory lists store a three tuple of the form [height, time, internal state]: the height at the end of a time step, the length of this step and the internal state the atom is in during it. """
     upper_heights_numerics: list[list] = []
     lower_heights_numerics: list[list] = []
     upper_velocities_numerics = list[Decimal]()
     lower_velocities_numerics = list[Decimal]()
 
-    """ Step 1: Attach the intial conditions to these lists.
-    The relative time counter comprises the time needed for the photon(s) to reach the atom. In this time step -- prior to the first beam splitter -- the atoms are in no spatial superposition and only divert in the next step. """
-    upper_heights_numerics.append([initial_height, relative_time_counter, internal_state_upper_path[0]])
+    """ Step 1: Attach the state at the first interaction to these lists.
+    The relative time counter comprises the time needed for the photon(s) to reach the atom. In this time step -- prior to the first beam splitter -- the atoms are in no spatial superposition and only divert in the next step.
+    Without the finite speed of light, the step has zero length and the first interaction happens at initial_height. """
+    upper_heights_numerics.append([first_interaction_height, relative_time_counter, internal_state_upper_path[0]])
 
     if upper_relaunches is None:
         upper_velocities_numerics.append(first_interaction_velocity)
     else:
         upper_velocities_numerics.append(first_interaction_velocity + Decimal(upper_relaunches[0]))
 
-    lower_heights_numerics.append([initial_height, relative_time_counter, internal_state_lower_path[0]])
+    lower_heights_numerics.append([first_interaction_height, relative_time_counter, internal_state_lower_path[0]])
 
     if lower_relaunches is None:
         lower_velocities_numerics.append(first_interaction_velocity)
@@ -2779,8 +2782,8 @@ def numerical_phases(
     # so the phase has no meaning. With the finite speed of light, photon_atom_interaction_time already stops the calculation at a pulse that cannot reach an atom;
     # this check also covers the calculation without it and the propagation between the pulses.
     for arm, heights in (("upper", upper_heights_numerics), ("lower", lower_heights_numerics)):
-        lowest_height = min(entry[0] for entry in heights)
-        highest_height = max(entry[0] for entry in heights)
+        lowest_height = min([initial_height] + [entry[0] for entry in heights])
+        highest_height = max([initial_height] + [entry[0] for entry in heights])
         if lowest_height < lower_laser_height or highest_height > upper_laser_height:
             raise AtomOutsideBaselineError(
                 f"The {arm} arm moves between z = {float(lowest_height):.6g} m and z = {float(highest_height):.6g} m and leaves the baseline between the lasers "
@@ -2813,175 +2816,91 @@ def numerical_phases(
     # ~~~ Propagation phase ~~~
     # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    # Calculation of the propagation phase
-    upper_prop_phase_numerics = Decimal(0)
-    time_counter = absolute_time_offset
+    def potential_energy_per_mass(height: Decimal, absolute_time: Decimal) -> Decimal:
 
-    for time_index in range(len(upper_heights_numerics)):
-        # Since the time index runs through all (2 * time_discretization + 1)-steps, we need to divide by the time discretization to get the correct interval number, i.e. 1, 2, or 3.
-        # Note that the internal state before the interferometer starts, i.e. object internal_state_upper_path[0], is irrelevant for the propagation phase and therefore not called.
+        """ Potential energy per mass phi(z, t) of the propagation phase. With only_tungsten, only the test masses (and the GGN) enter. """
+        return model_phi(
+            h = height,
+            ideal = ideal_potential,
+            absolute_time = absolute_time,
+            additional_global_acceleration = add_acceleration,
+            tungsten_positions = tungsten_positions,
+            g = g,
+            gravity_gradient = gravity_gradient,
+            test_mass = test_mass,
+            only_tungsten = only_tungsten,
+            GGN_noise = GGN_noise,
+            z_offset = z_offset
+        )
 
-        if upper_heights_numerics[time_index][2] == "e":
+    def lagrangian_per_mass(velocity: Decimal, potential: Decimal) -> Decimal:
 
-            # If the internal state is the excited state, we need to include the clock mass gain.
-            clock_term = clock_mass_gain
+        """ L / m = v^2 / 2 - phi, with internal states also - c^2 (the rest energy). With only_tungsten, the kinetic energy is left out. """
+        kinetic_energy = Decimal(0) if only_tungsten else velocity ** 2 / 2
+        rest_energy = c ** 2 if include_internal_state_changes else Decimal(0)
+        return kinetic_energy - potential - rest_energy
 
-        else:
-            clock_term = Decimal(0)
+    def action_per_mass(heights: list[list]) -> Decimal:
 
-        # The propagation phase, which is usually given as the integral over the Lagrangian, via infinitesimal sums over time steps.
-        # The first part is the kinetic energy minus and the second part is the gravitational potential energy, which is imported from the gravitational_model.py file.
-        # With internal states, the Lagrangian L = - m c^2 + m v^2 / 2 - m phi also contains the rest energy. The mass m (1 + clock_term) of the excited state gives the phase - clock_frequency * (time in the excited state).
-        time_counter += upper_heights_numerics[time_index][1]
+        """ Action of an arm divided by the mass m of the ground state: the integral of the Lagrangian along the trajectory, with the mass m (1 + clock_mass_gain) in the excited state.
+        This yields the phase - clock_frequency * (time in the excited state) and its redshift.
 
-        if include_internal_state_changes:
-            if only_tungsten:
-                upper_prop_phase_numerics += (
-                    - c ** 2 - model_phi(
-                        h = upper_heights_numerics[time_index][0],
-                        ideal = ideal_potential,
-                        absolute_time = time_counter,
-                        additional_global_acceleration = add_acceleration,
-                        tungsten_positions = tungsten_positions,
-                        g = g,
-                        gravity_gradient = gravity_gradient,
-                        test_mass = test_mass,
-                        only_tungsten = only_tungsten,
-                        GGN_noise = GGN_noise,
-                        z_offset = z_offset
-                    )) * Decimal(upper_heights_numerics[time_index][1] * (1 + clock_term))
+        Each entry of the height list holds the state at the end of a time step, the arm starts at initial_height. Within a step, atom_trajectory moves the atom on the parabola
+        z(t) = z_s + v_s t - a t^2 / 2 with the acceleration a = model_g(z_s), so the start velocity v_s follows from the heights at both ends of the step, also directly after a pulse.
+        Simpson's rule on this parabola is exact for the quadratic Lagrangian of the homogeneous field and fourth order in the time step otherwise.
+        A sum of the Lagrangian at the end points of the steps would be first order: Its error is large for each arm and only cancels between the arms in symmetric geometries such as the
+        Mach-Zehnder interferometer (e.g. 2 k g T^2 / time_discretization for a butterfly with the pulse separations T, 2T, T). """
 
-            else:
-                upper_prop_phase_numerics += (
-                    - c ** 2 + (upper_velocities_numerics[time_index] ** 2) / 2
-                    - model_phi(
-                        h = upper_heights_numerics[time_index][0],
-                        ideal = ideal_potential,
-                        absolute_time = time_counter,
-                        additional_global_acceleration = add_acceleration,
-                        tungsten_positions = tungsten_positions,
-                        g = g,
-                        gravity_gradient = gravity_gradient,
-                        test_mass = test_mass,
-                        only_tungsten = only_tungsten,
-                        GGN_noise = GGN_noise,
-                        z_offset = z_offset
-                    )) * Decimal(upper_heights_numerics[time_index][1] * (1 + clock_term))
+        action = Decimal(0)
+        start_height, start_time = initial_height, absolute_time_offset
+        start_potential = potential_energy_per_mass(height = start_height, absolute_time = start_time)
 
-        else:
-            if only_tungsten:
-                upper_prop_phase_numerics += - model_phi(
-                        h = upper_heights_numerics[time_index][0],
-                        ideal = ideal_potential,
-                        absolute_time = time_counter,
-                        additional_global_acceleration = add_acceleration,
-                        tungsten_positions = tungsten_positions,
-                        g = g,
-                        gravity_gradient = gravity_gradient,
-                        test_mass = test_mass,
-                        only_tungsten = only_tungsten,
-                        GGN_noise = GGN_noise,
-                        z_offset = z_offset
-                    ) * Decimal(upper_heights_numerics[time_index][1] * (1 + clock_term))
-            else:
-                upper_prop_phase_numerics += (
-                    (upper_velocities_numerics[time_index] ** 2) / 2
-                    - model_phi(
-                        h = upper_heights_numerics[time_index][0],
-                        ideal = ideal_potential,
-                        absolute_time = time_counter,
-                        additional_global_acceleration = add_acceleration,
-                        tungsten_positions = tungsten_positions,
-                        g = g,
-                        gravity_gradient = gravity_gradient,
-                        test_mass = test_mass,
-                        only_tungsten = only_tungsten,
-                        GGN_noise = GGN_noise,
-                        z_offset = z_offset
-                    )) * Decimal(upper_heights_numerics[time_index][1] * (1 + clock_term))
+        for end_height, step, internal_state in heights:
+            if step > 0:
+                acceleration = model_g(
+                    h = start_height,
+                    ideal = ideal_trajectory,
+                    absolute_time = start_time,
+                    additional_global_acceleration = add_acceleration,
+                    g = g,
+                    gravity_gradient = gravity_gradient,
+                    tungsten_positions = tungsten_positions,
+                    test_mass = test_mass
+                )
+                # Within the step, atom_trajectory moves the atom on the parabola z(t) = z_s + v_s t - a t^2 / 2, v(t) = v_s - a t.
+                # The lists only hold the end of each step, and directly after a pulse the kicked start velocity is not stored at all.
+                # z_e = z_s + v_s h - a h^2 / 2 therefore gives the start velocity v_s = (z_e - z_s) / h + a h / 2.
+                start_velocity = (end_height - start_height) / step + acceleration * step / 2
+                half_step = step / 2
+                mid_height = start_height + start_velocity * half_step - acceleration * half_step ** 2 / 2
+                mid_potential = potential_energy_per_mass(height = mid_height, absolute_time = start_time + half_step)
+                end_potential = potential_energy_per_mass(height = end_height, absolute_time = start_time + step)
 
-    # We perform the same steps for the lower interferometry path.
-    lower_prop_phase_numerics = Decimal(0)
-    time_counter = absolute_time_offset
+                # The excited state has the mass m (1 + clock_mass_gain), i.e. L = m (1 + clock_mass_gain) (v^2 / 2 - phi - c^2). The action is divided by the ground state mass m,
+                # so the factor (1 + clock_mass_gain) remains. It is constant within a step, since the internal state only changes at the pulses.
+                mass_factor = 1 + clock_mass_gain if internal_state == "e" else Decimal(1)
 
-    for time_index in range(len(lower_heights_numerics)):
-        if lower_heights_numerics[time_index][2] == "e":
+                # Simpson's rule for the integral of L / m over the step of length h: h / 6 * (f(0) + 4 f(h / 2) + f(h)), with f(t) = v(t)^2 / 2 - phi(z(t)) (- c^2).
+                # The three nodes are the start (v_s, phi(z_s)), the middle (v_s - a h / 2, phi(z(h / 2))) and the end (v_s - a h, phi(z_e)) of the parabola.
+                # The rule is exact for polynomials up to degree 3: In a homogeneous field, f(t) is quadratic in t and the integral is exact for any step length.
+                # With a gravity gradient, - Gamma z^2 / 2 adds a term of degree 4, and the error per step is of order h^5.
+                # The former sum of L(end) * h, i.e. only the last node with the weight h, was first order in the time step.
+                action += mass_factor * step / 6 * (
+                    lagrangian_per_mass(velocity = start_velocity, potential = start_potential)
+                    + 4 * lagrangian_per_mass(velocity = start_velocity - acceleration * half_step, potential = mid_potential)
+                    + lagrangian_per_mass(velocity = start_velocity - acceleration * step, potential = end_potential)
+                )
+                start_potential = end_potential
 
-            # If the internal state is the excited state, we need to include the clock mass gain.
-            clock_term = clock_mass_gain
+            elif end_height != start_height:
+                start_potential = potential_energy_per_mass(height = end_height, absolute_time = start_time)
 
-        else:
-            clock_term = Decimal(0)
+            start_height, start_time = end_height, start_time + step
 
-        time_counter += lower_heights_numerics[time_index][1]
+        return action
 
-        if include_internal_state_changes:
-            if only_tungsten:
-                lower_prop_phase_numerics += (
-                    - c ** 2 - model_phi(
-                        h = lower_heights_numerics[time_index][0],
-                        ideal = ideal_potential,
-                        absolute_time = time_counter,
-                        additional_global_acceleration = add_acceleration,
-                        tungsten_positions = tungsten_positions,
-                        g = g,
-                        gravity_gradient = gravity_gradient,
-                        test_mass = test_mass,
-                        only_tungsten = only_tungsten,
-                        GGN_noise = GGN_noise,
-                        z_offset = z_offset
-                    )) * Decimal(lower_heights_numerics[time_index][1] * (1 + clock_term))
-
-            else:
-                lower_prop_phase_numerics += (
-                    - c ** 2 + (lower_velocities_numerics[time_index] ** 2) / 2
-                    - model_phi(
-                        h = lower_heights_numerics[time_index][0],
-                        ideal = ideal_potential,
-                        absolute_time = time_counter,
-                        additional_global_acceleration = add_acceleration,
-                        tungsten_positions = tungsten_positions,
-                        g = g,
-                        gravity_gradient = gravity_gradient,
-                        test_mass = test_mass,
-                        only_tungsten = only_tungsten,
-                        GGN_noise = GGN_noise,
-                        z_offset = z_offset
-                    )) * Decimal(lower_heights_numerics[time_index][1] * (1 + clock_term))
-        else:
-            if only_tungsten:
-                lower_prop_phase_numerics += - model_phi(
-                        h = lower_heights_numerics[time_index][0],
-                        ideal = ideal_potential,
-                        absolute_time = time_counter,
-                        additional_global_acceleration = add_acceleration,
-                        tungsten_positions = tungsten_positions,
-                        g = g,
-                        gravity_gradient = gravity_gradient,
-                        test_mass = test_mass,
-                        only_tungsten = only_tungsten,
-                        GGN_noise = GGN_noise,
-                        z_offset = z_offset
-                    ) * Decimal(lower_heights_numerics[time_index][1] * (1 + clock_term))
-            else:
-                lower_prop_phase_numerics += (
-                    (lower_velocities_numerics[time_index] ** 2) / 2
-                    - model_phi(
-                        h = lower_heights_numerics[time_index][0],
-                        ideal = ideal_potential,
-                        absolute_time = time_counter,
-                        additional_global_acceleration = add_acceleration,
-                        tungsten_positions = tungsten_positions,
-                        g = g,
-                        gravity_gradient = gravity_gradient,
-                        test_mass = test_mass,
-                        only_tungsten = only_tungsten,
-                        GGN_noise = GGN_noise,
-                        z_offset = z_offset
-                    )) * Decimal(lower_heights_numerics[time_index][1] * (1 + clock_term))
-
-    # The propagation phase is then just the difference between the upper and lower path. We still need to divide by hbar/m to get the correct units, since this prefactor was left out of the Lagrangian.
-    propagation_phase = (upper_prop_phase_numerics - lower_prop_phase_numerics) / hbar_over_m
+    # The propagation phase is the difference of the actions of both arms, in units of hbar (the prefactor m / hbar was left out of the Lagrangian).
+    propagation_phase = (action_per_mass(heights = upper_heights_numerics) - action_per_mass(heights = lower_heights_numerics)) / hbar_over_m
 
     if print_trajectory:
         import matplotlib.pyplot as mpl

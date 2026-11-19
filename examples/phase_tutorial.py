@@ -93,7 +93,8 @@ compare("Raman MZI, T = 0.1 s", total(numerical_phases(interferometer = mach_zeh
 
 # %% 1b. The two arms of the interferometer
 
-""" The last two entries of numerical_phases are the trajectories of both arms: lists of [height, time step, internal state]. """
+""" The last two entries of numerical_phases are the trajectories of both arms: lists of [height, time step, internal state], with the height at the end of each time step.
+Both arms start at the launch height (here z = 0) at t = 0. """
 
 figure, axes = plt.subplots()
 for arm, color, label in ((phases[3], "black", "upper arm"), (phases[4], "tab:red", "lower arm")):
@@ -112,15 +113,15 @@ print(f"Trajectories saved to {OUTPUT_DIRECTORY / 'mzi_trajectories.png'}")
 # %% 2. Gravity gradient
 
 section("2. Gravity gradient")
-""" In the field g(z) = g - Gamma z, the phase gets the correction k Gamma T^2 (z0 + v0 T - 7/12 g T^2) (Peters et al., Metrologia 38, 25 (2001)).
-It depends on the launch conditions: The atoms sample the gradient along their trajectory.
-PHASE integrates the trajectories to first order in the time step, which resolves this term to about 1e-3. """
+""" In the field g(z) = g - Gamma z, the phase gets the correction k Gamma T^2 (z0 + (v0 + v_rec / 2) T - 7/12 g T^2) (Peters et al., Metrologia 38, 25 (2001)),
+with the recoil velocity v_rec = hbar k_eff / m. It depends on the launch conditions: The atoms sample the gradient along their trajectory.
+The formula is first order in Gamma: The terms of order Gamma^2 T^2 make up the remaining deviation of ~1e-6. """
 
 gradient: dict[str, Any] = dict(ideal_potential = "constant gradient", ideal_trajectory = "constant gradient")
 for z0, v0 in ((0, 10), (2, 12)):
     homogeneous = total(numerical_phases(interferometer = mzi, initial_height = z0, initial_velocity = v0, **no_fsl))
     with_gradient = total(numerical_phases(interferometer = mzi, initial_height = z0, initial_velocity = v0, **no_fsl, **gradient))
-    compare(f"gradient term, z0 = {z0} m, v0 = {v0} m/s", with_gradient - homogeneous, k_raman * Gamma * T ** 2 * (z0 + v0 * T - Decimal(7) / 12 * g * T ** 2))
+    compare(f"gradient term, z0 = {z0} m, v0 = {v0} m/s", with_gradient - homogeneous, k_raman * Gamma * T ** 2 * (z0 + (v0 + hbar * k_raman / m_Rb / 2) * T - Decimal(7) / 12 * g * T ** 2))
 
 """ Recoil in the gradient: The kicked arm is on average v_rec T / 2 higher, which adds hbar (n k)^2 Gamma T^3 / (2 m). It is the only term that depends on the mass of the atom
 (equivalence principle): We compare Rb-87 with a practically infinitely heavy atom. """
@@ -137,8 +138,8 @@ section("3. Finite speed of light")
 g (1 - 3 (g T - v) / c) instead of g. The correction is independent of k_eff and of the mirror positions. Here the atoms are dropped (v0 = 0) from z = 0 with the lower mirror at -25 m.
 v is the mean velocity of both arms after the first beam splitter, v = v0 + v_rec / 2 with the recoil velocity v_rec = hbar k_eff / m.
 
-The FSL correction is a small effect (1e-7 of the total phase). PHASE resolves it to about 1e-3 with 1000 time steps per pulse separation and, being first order in the time step,
-the extrapolation 2 phi(2n) - phi(n) removes this error to leading order. """
+The FSL correction is a small effect (1e-7 of the total phase). PHASE resolves it to ~1e-7 (the order of the neglected terms of the formula), independent of the number of time steps:
+The propagation phase integrates the Lagrangian along each time step. """
 
 drop_mzi = mach_zehnder(T = T, k_vector = raman_beams, lower_laser_height = -25, baseline = 26)  # Upper laser at -25 m + 26 m = 1 m
 drop: dict[str, Any] = dict(interferometer = drop_mzi, initial_height = 0, initial_velocity = 0)
@@ -149,7 +150,7 @@ for steps in (1000, 2000):
 v_rec = hbar * k_raman / m_Rb
 expected_correction = 3 * k_raman * g * T ** 2 * (g * T - (0 + v_rec / 2)) / c
 compare("FSL correction, 1000 steps", fsl_correction[1000], expected_correction)
-compare("FSL correction, extrapolated", 2 * fsl_correction[2000] - fsl_correction[1000], expected_correction)
+compare("FSL correction, 2000 steps", fsl_correction[2000], expected_correction)
 
 
 # %% 4. Single photon clock interferometer
@@ -232,16 +233,16 @@ print(f"Laser phase noise in a single MZI: {float(single_noise): .3e} rad, in th
 # %% 9. A test mass close to the trajectory
 
 section("9. Test mass")
-""" A 1.25 kg tungsten ring (simplified Stanford geometry) at z = 4 m attracts the atoms in both arms. PHASE integrates to first order in the time step,
-so the error of a local signal like this halves when time_discretization doubles. The extrapolation 2 phi(2n) - phi(n) removes it to leading order. """
+""" A 1.25 kg tungsten ring (simplified Stanford geometry) at z = 4 m attracts the atoms in both arms. The signal is local, but 1000 time steps per pulse separation
+already resolve it: The propagation phase integrates the Lagrangian along each step, and the result hardly changes with twice as many steps. """
 
 test_mass: dict[str, Any] = dict(test_mass = TestMass(experiment = StanfordMassSimplified(), radial_distance = 0.0), tungsten_positions = [4.0])
 signals: dict[int, Decimal] = {}
 for steps in (1000, 2000):
     settings: dict[str, Any] = dict(interferometer = mzi, initial_height = 0, initial_velocity = 10, time_discretization = steps, **no_fsl)
     signals[steps] = total(numerical_phases(**settings, **test_mass)) - total(numerical_phases(**settings))
-    print(f"test mass signal with {steps} steps per pulse separation: {float(signals[steps]):.6e} rad")
-print(f"extrapolated test mass signal: {float(2 * signals[2000] - signals[1000]):.6e} rad")
+    print(f"test mass signal with {steps} steps per pulse separation: {float(signals[steps]):.9e} rad")
+print(f"relative change from 1000 to 2000 steps: {float(signals[2000] / signals[1000] - 1):.1e}")
 
 
 # %% 10. Tides of the Sun and the Moon

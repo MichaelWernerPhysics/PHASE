@@ -66,8 +66,9 @@ gradiometers, gravitational waves, laser phase noise, test masses, tides and gra
   See [src/phase/geometries.py](src/phase/geometries.py) for examples.
 - **Result:** `numerical_phases` returns `[propagation phase, separation phase, laser phase, upper arm trajectory, lower arm trajectory]`. If an atom leaves the baseline between the lasers
   before the detection, the phase has no meaning and `numerical_phases` raises an `AtomOutsideBaselineError` (a `ValueError`).
-- **Accuracy:** The phases are evaluated with 45 significant digits. The trajectories are integrated to first order in the time step, with `time_discretization = 1000` steps per pulse separation.
-  This is sufficient for most signals. For local potentials (e.g. test masses) and small corrections (e.g. the finite speed of light), increase it or extrapolate 2 φ(2n) - φ(n).
+- **Accuracy:** The phases are evaluated with 45 significant digits, with `time_discretization = 1000` steps per pulse separation. The trajectories are exact in a homogeneous field and
+  first order in the time step otherwise. The propagation phase integrates the Lagrangian along each step (Simpson's rule), so the trajectory error only enters to second order:
+  1000 steps resolve the gravity gradient term, the finite speed of light and test mass signals to about 1e-9 (relative), also for unequal pulse separations.
 
 ## Known limitations
 

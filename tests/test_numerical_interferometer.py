@@ -230,7 +230,7 @@ Analytic result to first order in 1/c with x = s (g T - v0) / c:
 - Without FSL: g (1 + 2 x). This is the redshift of the excited state, i.e. its mass defect in the kinetic and potential energy.
 - FSL without Doppler effect: g (1 - x). The photon travel times change the time in the excited state by - 3 x.
 - FSL with Doppler effect: g (1 + 2 x). The Doppler tuned laser frequency cancels the - 3 x again.
-The residual 1 to 3 g T / (1000 c) is the discretization error of the redshift integral with time_discretization = 1000. '''
+The propagation phase integrates the redshift exactly along each time step, the remaining deviation (~1e-14) is of second order in 1/c. '''
 @pytest.mark.parametrize("include_FSL, include_Doppler", [(False, False), (True, False), (True, True)])
 @pytest.mark.parametrize("T, initial_velocity", [
     (Decimal("0.1"), Decimal(10)),
@@ -253,7 +253,7 @@ def test_clock_mzi_measures_g(direction: str, T: Decimal, initial_velocity: Deci
     x = s * (DEFAULT_G * T - initial_velocity) / c
     expected_g = DEFAULT_G * (1 - x) if include_FSL and not include_Doppler else DEFAULT_G * (1 + 2 * x)
 
-    assert relative_deviation(value = s * g_estimate(phase = phase, n = 1, k = k_clock, T = T), reference = expected_g) < 2e-10
+    assert relative_deviation(value = s * g_estimate(phase = phase, n = 1, k = k_clock, T = T), reference = expected_g) < 1e-13
 
 
 ''' Along the light ray, the laser phase s k (z - z_laser) - w t of a single photon pulse only depends on the emission time. With the FSL (and without the Doppler tuning of the laser frequency),
@@ -300,7 +300,8 @@ def test_two_photon_mzi_measures_g():
 
 
 ''' In the two-photon MZI, the pulse reaches the atom with the beam reflected at the lower mirror, i.e. coming from below. Contrary to the single photon clock MZI above, the laser phase k_eff z of the two
-counter-propagating beams does not cancel along the light ray and carries the signal. The photon travel times then shift the pulses in time and the MZI measures g (1 - 3 (g T - v0) / c).
+counter-propagating beams does not cancel along the light ray and carries the signal. The photon travel times then shift the pulses in time and the MZI measures g (1 - 3 (g T - v) / c),
+with the mean velocity v = v0 + v_rec / 2 of both arms after the first beam splitter (v_rec = hbar k / m).
 The correction is independent of k. A tiny k (no recoil, no arm separation) checks that both arms are timed equally and no k-independent phase remains. '''
 @pytest.mark.parametrize("k", [Decimal("1e-3"), k_clock, k_raman])
 @pytest.mark.parametrize("T, initial_velocity", [
@@ -312,14 +313,14 @@ The correction is independent of k. A tiny k (no recoil, no arm separation) chec
 def test_two_photon_mzi_measures_g_with_finite_speed_of_light(T, initial_velocity, k):
     phase = total_phase(interferometer = mzi(T = T, n = 1, interaction_type = "Two_Photon", k_vector = [k / 2, k / 2]), initial_velocity = initial_velocity, include_FSL_contribution = True, include_Doppler_effect = True)
 
-    expected_g = DEFAULT_G * (1 - 3 * (DEFAULT_G * T - initial_velocity) / c)
+    v_rec = Decimal(scp.hbar) * k / (87 * Decimal(scp.proton_mass))
+    expected_g = DEFAULT_G * (1 - 3 * (DEFAULT_G * T - initial_velocity - v_rec / 2) / c)
 
-    assert relative_deviation(value = g_estimate(phase = phase, n = 1, k = k, T = T), reference = expected_g) < 2e-10
+    assert relative_deviation(value = g_estimate(phase = phase, n = 1, k = k, T = T), reference = expected_g) < 1e-12
 
 
 ''' In a homogeneous field, the total phase does not depend on the detection time: The propagation phase accumulated after the last pulse is cancelled by the change of the separation phase.
-detection_time = 0 and detection_time > 0 run through different code paths. Both arms have to end at the same time and run on the same time grid, otherwise the (individually large) discretization errors
-of both arms do not cancel. '''
+detection_time = 0 and detection_time > 0 run through different code paths, and both arms have to end at the same time. '''
 @pytest.mark.parametrize("interferometer", [
     mzi(T = 1, n = 1, interaction_type = "Single_Photon", clock = True),
     mirrored_clock_mzi(T = 1),
@@ -329,7 +330,7 @@ of both arms do not cancel. '''
 def test_phase_does_not_depend_on_detection_time(interferometer: Interferometer, detection_time: Decimal) -> None:
     settings: dict[str, Any] = dict(interferometer = interferometer, include_FSL_contribution = True, include_Doppler_effect = True, include_internal_state_changes = True)
 
-    assert abs(total_phase(detection_time = detection_time, **settings) - total_phase(**settings)) < Decimal("1e-6")
+    assert abs(total_phase(detection_time = detection_time, **settings) - total_phase(**settings)) < Decimal("1e-15")
 
 
 ''' Detection: Both arms end detection_time after the interaction of the later arm with the last pulse; the earlier arm catches up and no arm is propagated backwards.
@@ -369,7 +370,30 @@ def test_detection_time_with_unequal_pulse_separations(detection_time: Decimal) 
     )
     settings: dict[str, Any] = dict(interferometer = interferometer)
 
-    assert abs(total_phase(detection_time = detection_time, **settings) - total_phase(**settings)) < Decimal("1e-6")
+    assert abs(total_phase(detection_time = detection_time, **settings) - total_phase(**settings)) < Decimal("1e-15")
+
+
+''' Butterfly: pulses at 0, T, 3T and 4T, the arms cross at 2T and close at 4T. To first order, it does not respond to a constant acceleration: The phase vanishes in a homogeneous field.
+The pulse separations are unequal, so the time steps have different lengths in the segments. A sum of the Lagrangian at the end points of the steps left 2 k g T^2 / time_discretization
+(7.9e4 rad for 1000 steps here), which only cancels between the arms for symmetric geometries such as the Mach-Zehnder interferometer. '''
+@pytest.mark.parametrize("time_discretization", [100, 1000])
+def test_butterfly_phase_vanishes_in_homogeneous_field(time_discretization: int) -> None:
+    T = Decimal("0.5")
+    butterfly = Interferometer(
+        name = "Butterfly",
+        time_intervals = [T, 2 * T, T],
+        upper_momentum = [0, 1, 0, 1, 0],
+        lower_momentum = [0, 0, 1, 0, 0],
+        upper_internal_state = ["g"] * 5,
+        lower_internal_state = ["g"] * 5,
+        interaction_type = ["Two_Photon"] * 4,
+        detunings = [0] * 4,
+        k_vector = [k_raman / 2, k_raman / 2]
+    )
+    # Launched with 2 g T, the atoms rise to 4.9 m and return to z = 0 at 4T.
+    phase = total_phase(interferometer = butterfly, initial_velocity = 2 * DEFAULT_G * T, time_discretization = time_discretization)
+
+    assert abs(phase) < Decimal("1e-25")
 
 
 ''' Multi-diamond clock interferometer from the GW analysis: Q diamonds in a homogeneous field give Q times the MZI phase, i.e. phase = -Q N k g T^2.
@@ -443,17 +467,15 @@ def test_test_mass_acts_on_both_arms(detection_time: Decimal, include_FSL: bool)
     assert abs(phase + swapped) < Decimal("1e-20")
 
 
-''' The phase is first order accurate in the time step. For the localized potential of a test mass, doubling time_discretization therefore halves the error of the
-test mass signal: signal(n) - signal(2 n) = 2 (signal(2 n) - signal(4 n)) up to higher orders. This justifies the extrapolation 2 signal(2 n) - signal(n) of tungsten_analysis.py. '''
-def test_test_mass_signal_converges_linearly_in_the_time_step() -> None:
+''' The propagation phase integrates the Lagrangian along each time step (Simpson's rule on the parabola of the step), so the localized signal of a test mass hardly depends on
+time_discretization: 1000 and 2000 steps agree to 5e-10. A sum of the Lagrangian at the end points of the steps differed by 0.5 % and needed the extrapolation 2 signal(2 n) - signal(n). '''
+def test_test_mass_signal_does_not_depend_on_the_time_step() -> None:
     test_mass: dict[str, Any] = dict(test_mass = TungstenTestMass(experiment = StanfordMassSimplified(), radial_distance = 0.0), tungsten_positions = [4.0])
 
     def signal(time_discretization: int) -> Decimal:
         return total_phase(interferometer = mzi(), time_discretization = time_discretization, **test_mass) - total_phase(interferometer = mzi(), time_discretization = time_discretization)
 
-    signals = {time_discretization: signal(time_discretization = time_discretization) for time_discretization in (1000, 2000, 4000)}
-
-    assert abs((signals[1000] - signals[2000]) / (signals[2000] - signals[4000]) - 2) < Decimal("0.01")
+    assert relative_deviation(value = signal(time_discretization = 1000), reference = signal(time_discretization = 2000)) < 1e-8
     # The default is 1000 time steps.
     assert total_phase(interferometer = mzi(), **test_mass) == total_phase(interferometer = mzi(), time_discretization = 1000, **test_mass)
 
@@ -490,8 +512,8 @@ def test_only_kick_phase_survives_in_homogeneous_field():
 # ~~~ Correction terms ~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-''' Gravity gradient Gamma = DEFAULT_GRAVITY_GRADIENT: phase = -k g T^2 + k Gamma T^2 (z0 + v0 T - 7/12 g T^2) (e.g. Peters et al., Metrologia 38, 25 (2001)).
-The first order integrator in numerical_phases resolves the gradient term only to a few 1e-3 (relative to the gradient term, i.e. ~1e-9 relative to g). '''
+''' Gravity gradient Gamma = DEFAULT_GRAVITY_GRADIENT: phase = -k g T^2 + k Gamma T^2 (z0 + (v0 + v_rec / 2) T - 7/12 g T^2) (e.g. Peters et al., Metrologia 38, 25 (2001)).
+The formula is first order in Gamma. The terms of order Gamma^2 T^2 make up the remaining relative deviation of ~2e-6. '''
 @pytest.mark.parametrize("initial_height, initial_velocity", [(0, 10), (2, 8), (0, 0)])
 def test_gravity_gradient_correction(initial_height, initial_velocity):
     T = Decimal(1)
@@ -499,9 +521,10 @@ def test_gravity_gradient_correction(initial_height, initial_velocity):
     homogeneous = total_phase(interferometer = interferometer, initial_height = initial_height, initial_velocity = initial_velocity)
     gradient = total_phase(interferometer = interferometer, initial_height = initial_height, initial_velocity = initial_velocity, ideal_potential = "constant gradient", ideal_trajectory = "constant gradient")
 
-    expected = k_clock * DEFAULT_GRAVITY_GRADIENT * T ** 2 * (Decimal(initial_height) + Decimal(initial_velocity) * T - Decimal(7) / 12 * DEFAULT_G * T ** 2)
+    v_rec = Decimal(scp.hbar) * k_clock / (87 * Decimal(scp.proton_mass))
+    expected = k_clock * DEFAULT_GRAVITY_GRADIENT * T ** 2 * (Decimal(initial_height) + (Decimal(initial_velocity) + v_rec / 2) * T - Decimal(7) / 12 * DEFAULT_G * T ** 2)
 
-    assert relative_deviation(value = gradient - homogeneous, reference = expected) < 1e-2
+    assert relative_deviation(value = gradient - homogeneous, reference = expected) < 1e-5
 
 
 ''' Equivalence principle: In a homogeneous field the phase must not depend on the mass of the atom. '''
@@ -910,8 +933,8 @@ def test_gradiometer_in_homogeneous_field_vanishes():
     assert abs(differential_phase) < Decimal("1e-20")
 
 
-''' The wrappers pass time_discretization on, so that the extrapolation 2 phi(2 n) - phi(n) also works for differential measurements:
-Each wrapper equals the difference of two numerical_phases calls with the same number of time steps. A test mass makes the phase depend on it. '''
+''' The wrappers pass time_discretization on, so that the convergence can be checked for differential measurements as well:
+Each wrapper equals the difference of two numerical_phases calls with the same number of time steps. With a test mass, the phase depends (slightly) on it. '''
 def test_differential_wrappers_pass_on_time_discretization() -> None:
     test_mass: dict[str, Any] = dict(test_mass = TungstenTestMass(experiment = StanfordMassSimplified(), radial_distance = 0.0), tungsten_positions = [4.0])
     no_fsl: dict[str, Any] = dict(include_FSL_contribution = False, include_Doppler_effect = False)
