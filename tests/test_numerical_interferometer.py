@@ -51,11 +51,14 @@ def mzi(
         interaction_type: str = "Single_Photon",
         clock: bool = False,
         nucleon_number: int = 87,
-        k_vector: Decimal | list[Decimal] = k_clock
+        k_vector: Decimal | list[Decimal] = k_clock,
+        lower_laser_height: Decimal | float | int = -1,
+        baseline: Decimal | float | int = 12
     ) -> Interferometer:
 
     """ Mach-Zehnder interferometer with pulse separation T and n photon momenta per beam splitter. If clock = True, the kicked arm is in the excited state.
-    Single photon pulses come from the lower laser (light travelling up), s.t. the absorption g -> e kicks the atom up and the stimulated emission e -> g kicks it down. """
+    Single photon pulses come from the lower laser (light travelling up), s.t. the absorption g -> e kicks the atom up and the stimulated emission e -> g kicks it down.
+    The atoms have to stay between the lasers: Tests that launch them far up or down use a larger baseline. """
     return Interferometer(
         name = "MZI",
         time_intervals = [T, T],
@@ -67,6 +70,8 @@ def mzi(
         detunings = [0, 0, 0],
         k_vector = k_vector,
         nucleon_number = nucleon_number,
+        lower_laser_height = lower_laser_height,
+        baseline = baseline,
         single_photon_laser_direction = ["Up" if interaction_type == "Single_Photon" else None] * 3
     )
 
@@ -200,8 +205,9 @@ def test_photon_atom_interaction_time_upwards_photon():
 
 
 @pytest.mark.parametrize("photon_height, direction", [(Decimal(1), "down"), (Decimal(9), "up")])
-def test_photon_atom_interaction_time_is_nan_if_photon_already_passed(photon_height, direction):
-    assert ni.photon_atom_interaction_time(photon_start_height = photon_height, light_direction = direction, target_height = Decimal(5), target_velocity = Decimal(0), ideal_trajectory = "homogeneous").is_nan()
+def test_photon_atom_interaction_time_raises_if_photon_already_passed(photon_height, direction):
+    with pytest.raises(ni.AtomOutsideBaselineError, match = "cannot reach the atom"):
+        ni.photon_atom_interaction_time(photon_start_height = photon_height, light_direction = direction, target_height = Decimal(5), target_velocity = Decimal(0), ideal_trajectory = "homogeneous")
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -230,7 +236,7 @@ The residual 1 to 3 g T / (1000 c) is the discretization error of the redshift i
     (Decimal("0.1"), Decimal(10)),
     (Decimal("0.1"), Decimal(0)),
     (Decimal(1), Decimal(10)),
-    (Decimal(1), Decimal(15)),
+    (Decimal(1), Decimal(14)),
     (Decimal(1), DEFAULT_G),
 ])
 @pytest.mark.parametrize("direction", ["Up", "Down"])
@@ -252,7 +258,7 @@ def test_clock_mzi_measures_g(direction: str, T: Decimal, initial_velocity: Deci
 
 ''' Along the light ray, the laser phase s k (z - z_laser) - w t of a single photon pulse only depends on the emission time. With the FSL (and without the Doppler tuning of the laser frequency),
 the spatial and temporal kick phase therefore cancel, up to the tiny mass defect of the excited state in the kick velocity. Without the FSL, the kick phase carries the full signal - s k g T^2. '''
-@pytest.mark.parametrize("initial_velocity", [Decimal(10), Decimal(12), Decimal(15)])
+@pytest.mark.parametrize("initial_velocity", [Decimal(10), Decimal(12), Decimal(14)])
 @pytest.mark.parametrize("direction", ["Up", "Down"])
 def test_single_photon_laser_phase_does_not_depend_on_trajectory(direction: str, initial_velocity: Decimal) -> None:
     s = 1 if direction == "Up" else -1
@@ -408,8 +414,9 @@ def test_phase_is_quadratic_in_pulse_separation():
 
 @pytest.mark.parametrize("initial_height, initial_velocity", [(0, 4), (3, 10), (-2, 15)])
 def test_phase_does_not_depend_on_launch_conditions_in_homogeneous_field(initial_height, initial_velocity):
-    reference = total_phase(interferometer = mzi())
-    phase = total_phase(interferometer = mzi(), initial_height = initial_height, initial_velocity = initial_velocity)
+    # Lasers at -20 m and 20 m: The atoms stay inside the baseline for all launches.
+    reference = total_phase(interferometer = mzi(lower_laser_height = -20, baseline = 40))
+    phase = total_phase(interferometer = mzi(lower_laser_height = -20, baseline = 40), initial_height = initial_height, initial_velocity = initial_velocity)
 
     assert abs(phase - reference) < Decimal("1e-20")
 
@@ -488,8 +495,9 @@ The first order integrator in numerical_phases resolves the gradient term only t
 @pytest.mark.parametrize("initial_height, initial_velocity", [(0, 10), (2, 8), (0, 0)])
 def test_gravity_gradient_correction(initial_height, initial_velocity):
     T = Decimal(1)
-    homogeneous = total_phase(interferometer = mzi(T = T), initial_height = initial_height, initial_velocity = initial_velocity)
-    gradient = total_phase(interferometer = mzi(T = T), initial_height = initial_height, initial_velocity = initial_velocity, ideal_potential = "constant gradient", ideal_trajectory = "constant gradient")
+    interferometer = mzi(T = T, lower_laser_height = -20, baseline = 40)  # The dropped atoms (v0 = 0) fall to -19.6 m.
+    homogeneous = total_phase(interferometer = interferometer, initial_height = initial_height, initial_velocity = initial_velocity)
+    gradient = total_phase(interferometer = interferometer, initial_height = initial_height, initial_velocity = initial_velocity, ideal_potential = "constant gradient", ideal_trajectory = "constant gradient")
 
     expected = k_clock * DEFAULT_GRAVITY_GRADIENT * T ** 2 * (Decimal(initial_height) + Decimal(initial_velocity) * T - Decimal(7) / 12 * DEFAULT_G * T ** 2)
 
@@ -573,7 +581,7 @@ def test_gravitational_wave_without_strain_changes_nothing():
     assert total_phase(gw = GravWave(frequency = 0.3, strain = 0), **settings) == total_phase(**settings)
 
 
-''' The GGN phases are drawn from the seed of the GGN_Noise_Model at every evaluation of the potential, so the same seed has to give the same noise realization. '''
+''' The GGN phases are drawn from the seed of the GGN_Noise_Model, so the same seed has to give the same noise realization. '''
 @pytest.mark.slow
 @pytest.mark.parametrize("model, noise_type", [("seismic", "NLNM"), ("atmospheric", "low")])
 def test_ggn_noise_realization_is_fixed_by_seed(model, noise_type):
@@ -659,6 +667,43 @@ def test_mirror_jitter_is_imprinted_at_the_pulses(k_1: Decimal, k_2: Decimal) ->
     assert total_phase(interferometer = single_photon, random_phases_mirror_jitter = random_phases) == total_phase(interferometer = single_photon)
 
 
+''' One random phase per line of the noise model: A shorter list would drop lines (laser phase noise) or fail with an IndexError (mirror jitter), a longer one would be cut. '''
+@pytest.mark.parametrize("noise_source, argument", [("Laser Phase", "random_phases_laser_noise"), ("Mirror Jitter", "random_phases_mirror_jitter")])
+@pytest.mark.parametrize("difference", [-1, 1])
+def test_random_phases_need_one_phase_per_line(noise_source: str, argument: str, difference: int) -> None:
+    number_of_lines = len(lpn.frequencies_and_noise) if noise_source == "Laser Phase" else len(gm.frequencies_and_amplitudes)
+    interferometer = mzi(T = 1, n = 1, interaction_type = "Two_Photon", k_vector = [k_raman / 2, k_raman / 2])
+    interferometer.noise = [noise_source]
+
+    with pytest.raises(ValueError, match = f"{argument} needs one random phase per line of the noise model, i.e. {number_of_lines}"):
+        total_phase(interferometer = interferometer, **{argument: [0.0] * (number_of_lines + difference)})
+
+    # One phase per line is accepted.
+    total_phase(interferometer = interferometer, **{argument: [0.0] * number_of_lines})
+
+
+''' The number of lines is read at every call: set_white_phase_noise replaces the noise model, and the random phases have to follow it. '''
+def test_random_phases_follow_the_number_of_lines_of_the_noise_model() -> None:
+    interferometer = laser_noise_mzi()
+    try:
+        lpn.set_white_phase_noise(number_of_lines = 10)
+        total_phase(interferometer = interferometer, random_phases_laser_noise = [0.0] * 10)
+        with pytest.raises(ValueError, match = "i.e. 10"):
+            total_phase(interferometer = interferometer, random_phases_laser_noise = [0.0] * lpn.DEFAULT_NUMBER_OF_LINES)
+    finally:
+        lpn.set_white_phase_noise()
+
+
+''' Random phases of a noise source that is not in the noise list of the interferometer have no effect. A warning points this out. '''
+def test_random_phases_without_noise_source_are_ignored_with_a_warning() -> None:
+    random_phases = random_laser_phases(seed = 1)
+
+    with pytest.warns(UserWarning, match = "random_phases_laser_noise is ignored"):
+        phase = total_phase(interferometer = mzi(), random_phases_laser_noise = random_phases)
+
+    assert phase == total_phase(interferometer = mzi())
+
+
 ''' Both ensembles of a single-photon gradiometer are driven by the same pulses of the same laser, so the laser phase noise cancels in the differential phase. '''
 def test_laser_phase_noise_cancels_in_single_photon_gradiometer() -> None:
     settings: dict[str, Any] = dict(
@@ -673,7 +718,6 @@ def test_laser_phase_noise_cancels_in_single_photon_gradiometer() -> None:
     noisy_phase = numerical_same_interferometer_height_difference(random_phases_laser_noise = random_laser_phases(seed = 1), **settings)
     noise_free_phase = numerical_same_interferometer_height_difference(**settings)
 
-    assert noisy_phase is not None and noise_free_phase is not None
     assert abs(noisy_phase - noise_free_phase) < Decimal("1e-20")
 
 
@@ -718,12 +762,37 @@ def test_clock_mzi_spends_T_in_excited_state():
     assert abs(excited_lower - 1) < Decimal("1e-7")
 
 
-def test_returns_none_if_atom_leaves_the_baseline():
-    # Launched with 5 m/s, the atom falls 9.6 m below the lower mirror at -1 m before the last pulse.
-    phases = numerical_phases(interferometer = mzi(T = 1, n = 1, interaction_type = "Two_Photon", k_vector = [k_clock / 2, k_clock / 2]), initial_height = 0, initial_velocity = 5)
+''' If an atom leaves the baseline between the lasers, the phase has no meaning: With the finite speed of light, the light cannot reach the atom at the next pulse.
+Without it, the trajectories are checked. Both cases raise an error, also in the wrappers. '''
+@pytest.mark.parametrize("include_FSL", [True, False])
+@pytest.mark.parametrize("initial_velocity, side", [(5, "below"), (16, "above")])
+def test_raises_if_atom_leaves_the_baseline(include_FSL: bool, initial_velocity: int, side: str) -> None:
+    # Launched with 5 m/s, the atom falls to -9.6 m (below the lower mirror at -1 m) before the last pulse. Launched with 16 m/s, it rises to 13.1 m (above the upper laser at 11 m).
+    interferometer = mzi(T = 1, n = 1, interaction_type = "Two_Photon", k_vector = [k_clock / 2, k_clock / 2])
+    settings: dict[str, Any] = dict(include_FSL_contribution = include_FSL, include_Doppler_effect = include_FSL)
 
-    assert phases[0] is None
-    assert num_phase_with_origin(interferometer = mzi(T = 1, n = 1, interaction_type = "Two_Photon", k_vector = [k_clock / 2, k_clock / 2]), init_height = 0, init_velocity = 5) is None
+    with pytest.raises(ni.AtomOutsideBaselineError):
+        numerical_phases(interferometer = interferometer, initial_height = 0, initial_velocity = initial_velocity, **settings)
+    with pytest.raises(ni.AtomOutsideBaselineError):
+        num_phase_with_origin(interferometer = interferometer, init_height = 0, init_velocity = initial_velocity, **settings)
+    with pytest.raises(ni.AtomOutsideBaselineError):
+        numerical_same_interferometer_height_difference(
+            interferometer = interferometer,
+            height_delta = Decimal("-0.5") if side == "below" else Decimal("0.5"),
+            init_height = Decimal(0),
+            init_velocity = Decimal(initial_velocity),
+            **settings
+        )
+
+
+''' After the last pulse, the atoms are propagated until the detection. They have to stay inside the baseline during this time as well. '''
+def test_raises_if_atom_leaves_the_baseline_before_the_detection() -> None:
+    # Launched with 10 m/s, the atoms are at 0.4 m after the last pulse at 2 s, and fall below the lower laser at -1 m about 0.14 s later.
+    settings: dict[str, Any] = dict(interferometer = mzi(), initial_height = 0, initial_velocity = 10)
+    numerical_phases(detection_time = Decimal("0.05"), **settings)
+
+    with pytest.raises(ni.AtomOutsideBaselineError, match = "leaves the baseline"):
+        numerical_phases(detection_time = Decimal("0.2"), **settings)
 
 
 ''' The lasers are part of the Interferometer: the lower laser (or retro-reflection mirror) at lower_laser_height and the upper laser one baseline above it.
@@ -731,7 +800,8 @@ Light from below cannot reach an atom below the mirror, light from above cannot 
 def test_laser_geometry_of_the_interferometer_is_used() -> None:
     # Launched with 5 m/s, the atom falls to -9.6 m before the last pulse: below the default mirror at -1 m, above a mirror at -20 m.
     beams = [k_raman / 2, k_raman / 2]
-    assert numerical_phases(interferometer = mach_zehnder(T = 1, k_vector = beams), initial_height = 0, initial_velocity = 5)[0] is None
+    with pytest.raises(ni.AtomOutsideBaselineError):
+        numerical_phases(interferometer = mach_zehnder(T = 1, k_vector = beams), initial_height = 0, initial_velocity = 5)
     assert numerical_phases(interferometer = mach_zehnder(T = 1, k_vector = beams, lower_laser_height = -20, baseline = 32), initial_height = 0, initial_velocity = 5)[0] is not None
 
     # Launched with 10 m/s, the atom is at 5.1 m at the second pulse: below the default upper laser at -1 m + 12 m = 11 m, above an upper laser at -1 m + 5 m = 4 m.
@@ -740,7 +810,8 @@ def test_laser_geometry_of_the_interferometer_is_used() -> None:
 
     settings: dict[str, Any] = dict(initial_height = 0, initial_velocity = 10, include_internal_state_changes = True)
     assert numerical_phases(interferometer = clock_mzi_with_light_from_above(baseline = 12), **settings)[0] is not None
-    assert numerical_phases(interferometer = clock_mzi_with_light_from_above(baseline = 5), **settings)[0] is None
+    with pytest.raises(ni.AtomOutsideBaselineError):
+        numerical_phases(interferometer = clock_mzi_with_light_from_above(baseline = 5), **settings)
 
 
 ''' The laser phase refers to the laser that emits the light (the retro-reflection mirror for two-photon pulses), not to the origin z = 0. Shifting the lasers and the atoms together
@@ -793,7 +864,6 @@ def test_differential_measurement_with_different_k_vectors() -> None:
         include_Doppler_effect = False
     )
 
-    assert differential_phase is not None
     assert relative_deviation(value = differential_phase, reference = k_clock * DEFAULT_G) < 1e-12
 
 
@@ -824,7 +894,6 @@ def test_gradiometer_measures_gravity_gradient():
         include_Doppler_effect = False
     )
 
-    assert differential_phase is not None
     assert relative_deviation(value = differential_phase, reference = - k_clock * DEFAULT_GRAVITY_GRADIENT * T ** 2 * delta_z) < 1e-2
 
 
@@ -838,8 +907,44 @@ def test_gradiometer_in_homogeneous_field_vanishes():
         include_Doppler_effect = False
     )
 
-    assert differential_phase is not None
     assert abs(differential_phase) < Decimal("1e-20")
+
+
+''' The wrappers pass time_discretization on, so that the extrapolation 2 phi(2 n) - phi(n) also works for differential measurements:
+Each wrapper equals the difference of two numerical_phases calls with the same number of time steps. A test mass makes the phase depend on it. '''
+def test_differential_wrappers_pass_on_time_discretization() -> None:
+    test_mass: dict[str, Any] = dict(test_mass = TungstenTestMass(experiment = StanfordMassSimplified(), radial_distance = 0.0), tungsten_positions = [4.0])
+    no_fsl: dict[str, Any] = dict(include_FSL_contribution = False, include_Doppler_effect = False)
+    wrapper_settings: dict[str, Any] = dict(init_height = Decimal(0), init_velocity = Decimal(10), time_discretization = 200, **no_fsl, **test_mass)
+    other_k = mzi(k_vector = 2 * k_clock)
+
+    differential_phase = numerical_differential_interferometer(interferometer_1 = mzi(), interferometer_2 = other_k, **wrapper_settings)
+    expected_differential_phase = total_phase(interferometer = mzi(), time_discretization = 200, **test_mass) - total_phase(interferometer = other_k, time_discretization = 200, **test_mass)
+
+    gradiometer_phase = numerical_same_interferometer_height_difference(interferometer = mzi(), height_delta = Decimal(1), **wrapper_settings)
+    expected_gradiometer_phase = (
+        total_phase(interferometer = mzi(), time_discretization = 200, **test_mass)
+        - total_phase(interferometer = mzi(), initial_height = 1, time_discretization = 200, **test_mass)
+    )
+
+    assert differential_phase == expected_differential_phase
+    assert gradiometer_phase == expected_gradiometer_phase
+    # The number of time steps matters for this signal, i.e. the comparison above is not passed with the default of 1000 steps.
+    assert expected_differential_phase != total_phase(interferometer = mzi(), **test_mass) - total_phase(interferometer = other_k, **test_mass)
+
+
+''' The gradiometer wrapper passes z_offset on: The GGN model "underground" depends on the depth z_offset - z below the surface. '''
+def test_gradiometer_passes_on_z_offset() -> None:
+    noise = GGN_Noise_Model(type = "NHNM", frequencies = np.linspace(0.1, 1, 10), rng = 5, model = "underground")
+    settings: dict[str, Any] = dict(GGN_noise = noise, z_offset = 20.0, time_discretization = 200)
+    wrapper_settings: dict[str, Any] = dict(init_height = Decimal(0), init_velocity = Decimal(10), include_FSL_contribution = False, include_Doppler_effect = False)
+
+    gradiometer_phase = numerical_same_interferometer_height_difference(interferometer = mzi(), height_delta = Decimal(1), **wrapper_settings, **settings)
+    expected_phase = total_phase(interferometer = mzi(), **settings) - total_phase(interferometer = mzi(), initial_height = 1, **settings)
+    default_z_offset = numerical_same_interferometer_height_difference(interferometer = mzi(), height_delta = Decimal(1), GGN_noise = noise, time_discretization = 200, **wrapper_settings)
+
+    assert gradiometer_phase == expected_phase
+    assert gradiometer_phase != default_z_offset
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -899,7 +1004,8 @@ def test_single_photon_frequency_has_to_match_clock_frequency() -> None:
 ''' The MZI measures the g that is passed to numerical_phases, not the default value. '''
 @pytest.mark.parametrize("g", [Decimal("9.81"), Decimal("1.62")])
 def test_mzi_measures_the_given_g(g: Decimal) -> None:
-    phase = total_phase(interferometer = mzi(), g = g)
+    # On the Moon (1.62 m/s^2), the atoms launched with 10 m/s rise to 31 m.
+    phase = total_phase(interferometer = mzi(baseline = 40), g = g)
 
     assert relative_deviation(value = g_estimate(phase = phase, n = 1, k = k_clock, T = 1), reference = g) < 1e-12
 
@@ -919,7 +1025,6 @@ def test_gradiometer_measures_the_given_gradient() -> None:
         gravity_gradient = gradient,
     )
 
-    assert differential_phase is not None
     assert relative_deviation(value = differential_phase, reference = - k_clock * gradient * T ** 2 * delta_z) < 1e-2
 
 

@@ -263,8 +263,8 @@ class StanfordMass:
         self.name = name
         self.height = height                                        # Height of the ring in meters
         self.inner_radius = inner_radius                            # Inner radius of the ring in meters
-        self.outer_radius = outer_radius                            # Inner radius of the ring in meters
-        self.final_integration_angle = final_integration_angle      # Inner radius of the ring in meters
+        self.outer_radius = outer_radius                            # Outer radius of the ring in meters
+        self.final_integration_angle = final_integration_angle      # Angular extent of the ring segment in rad
 
 
 class StanfordMassSimplified:
@@ -276,8 +276,8 @@ class StanfordMassSimplified:
     ) -> None:
 
         self.name = name
-        self.mean_radial_distance = mean_radial_distance        # Height of the ring in meters
-        self.mass = mass                                        # Inner radius of the ring in meters
+        self.mean_radial_distance = mean_radial_distance        # Radius of the thin ring around the baseline in meters
+        self.mass = mass                                        # Total mass of the ring in kg
 
 
 class TestMass:
@@ -290,7 +290,14 @@ class TestMass:
 
         self.experiment = experiment     # TestMass used in the corresponding experiment
         self.radial_distance = radial_distance                          # Radial distance from the reference point (usually center of mass) to the baseline
-        self.mass_density = mass_density                                # Mass density of tungsten in kg / m^3
+        self.mass_density = mass_density                                # Mass density of tungsten in kg / m^3 (StanfordMass only, the simplified ring has its total mass)
+
+        # The simplified ring is a thin ring centred on the baseline. Its potential on the axis is - G M / sqrt(z^2 + R^2); off the axis, it would need elliptic integrals.
+        # A radial distance would be ignored silently, so it is rejected. StanfordMass takes it into account.
+        if isinstance(experiment, StanfordMassSimplified) and radial_distance != 0:
+            raise ValueError(
+                f"StanfordMassSimplified is a thin ring centred on the baseline and has no radial distance (given: {radial_distance} m). Use StanfordMass for a mass off the axis."
+            )
 
 
 class GGN_Noise_Model:
@@ -304,7 +311,7 @@ class GGN_Noise_Model:
 
         self.type = type
         self.frequencies = frequencies
-        # Seed of the random GGN phases. make_modes draws them at every evaluation of the potential, so they have to be fixed for a consistent noise realization.
+        # Seed of the random GGN phases. It fixes the noise realization: The modes are drawn once per realization (see ggn_modes) and used at every evaluation of the potential.
         self.rng = rng if rng is not None else int(np.random.default_rng().integers(2**32))
         self.model = model
 

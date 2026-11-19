@@ -1,7 +1,10 @@
+import warnings
 from decimal import Decimal
 
 import scipy.constants as spc
 
+import phase.gravitational_model.gravitational_model as gravitational_model
+import phase.laser_phase_noise_model.laser_phase_noise_model as laser_phase_noise_model
 from phase.classes import (
     GGN_Noise_Model,
     GravWave,
@@ -18,6 +21,11 @@ from phase.gravitational_model import (
     model_phi,
 )
 from phase.laser_phase_noise_model import phase_noise
+
+
+class AtomOutsideBaselineError(ValueError):
+    """ An atom leaves the baseline between the lower laser (or the retro-reflection mirror) and the upper laser. The light cannot reach it there, so the phase has no meaning. """
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~ Numerical Analysis ~~~
@@ -138,10 +146,10 @@ def photon_atom_interaction_time(
     if light_direction == "up":
         """ Sanity check for boundary conditions."""
         if photon_start_height > target_height:
-            print("Photon is already above the atom. No interaction possible.")
-            print("photon_start_height", photon_start_height)
-            print("target_height", target_height)
-            return Decimal("nan")
+            raise AtomOutsideBaselineError(
+                f"The light travelling up from z = {float(photon_start_height):.6g} m cannot reach the atom at z = {float(target_height):.6g} m below it: "
+                "The atom has left the baseline. Change the launch, the pulse separations or the lasers (lower_laser_height, baseline)."
+            )
 
         for index in range(len(dt_list)):
             dt = Decimal(10 ** dt_list[index])
@@ -180,10 +188,10 @@ def photon_atom_interaction_time(
     elif light_direction == "down":
         """ Sanity check of boundary conditions."""
         if photon_start_height < target_height:
-            print("Photon is already below the atom. No interaction possible.")
-            print("photon_start_height", photon_start_height)
-            print("target_height", target_height)
-            return Decimal("nan")
+            raise AtomOutsideBaselineError(
+                f"The light travelling down from z = {float(photon_start_height):.6g} m cannot reach the atom at z = {float(target_height):.6g} m above it: "
+                "The atom has left the baseline. Change the launch, the pulse separations or the lasers (lower_laser_height, baseline)."
+            )
 
         for index in range(len(dt_list)):
             dt = Decimal(10 ** dt_list[index])
@@ -436,6 +444,24 @@ def numerical_phases(
         if "Laser Phase" in noise_list:
             laser_phase_noise_bool = True
 
+    """ The random phases belong to the lines of the noise models: one phase per line, see set_white_phase_noise and set_white_mirror_jitter.
+    The number of lines is read from the modules at every call, since the setters replace the lists. Random phases of a noise source that is not in the noise list are ignored. """
+    random_noise_phases = (
+        ("Laser Phase", "random_phases_laser_noise", random_phases_laser_noise, laser_phase_noise_bool, len(laser_phase_noise_model.frequencies_and_noise), "set_white_phase_noise"),
+        ("Mirror Jitter", "random_phases_mirror_jitter", random_phases_mirror_jitter, mirror_jitter_bool, len(gravitational_model.frequencies_and_amplitudes), "set_white_mirror_jitter"),
+    )
+    for noise_source, argument, random_phases, noise_included, number_of_lines, setter in random_noise_phases:
+        if random_phases is None:
+            continue
+
+        if not noise_included:
+            warnings.warn(f"{argument} is ignored: {noise_source!r} is not in the noise list of the interferometer {interferometer.name}.", stacklevel = 2)
+
+        elif len(random_phases) != number_of_lines:
+            raise ValueError(
+                f"{argument} needs one random phase per line of the noise model, i.e. {number_of_lines} (see {setter}), but has {len(random_phases)}."
+            )
+
     """ Adding a global acceleration, i.e. from the Earth-Sun-Moon system, if needed.
     This acceleration is assumed to be constant on the time scale of the interferometer and spatially universal on the length scale of the interferometer.
 
@@ -648,8 +674,6 @@ def numerical_phases(
                 g = g,
                 gravity_gradient = gravity_gradient,
             )
-            if delta_time.is_nan():
-                return [None, None, None, None, None, None]
 
             relative_time_counter += delta_time
             abs_time_upper += delta_time
@@ -677,8 +701,6 @@ def numerical_phases(
                     g = g,
                     gravity_gradient = gravity_gradient,
                 )
-                if delta_time.is_nan():
-                    return [None, None, None, None, None, None]
 
                 relative_time_counter += delta_time
                 abs_time_upper += delta_time
@@ -697,8 +719,6 @@ def numerical_phases(
                     g = g,
                     gravity_gradient = gravity_gradient,
                 )
-                if delta_time.is_nan():
-                    return [None, None, None, None, None, None]
 
                 relative_time_counter += delta_time
                 abs_time_upper += delta_time
@@ -1252,8 +1272,6 @@ def numerical_phases(
                     g = g,
                     gravity_gradient = gravity_gradient,
                 )
-                if relative_time_counter_upper_path.is_nan():
-                    return [None, None, None, None, None, None]
 
                 abs_time_upper += photon_atom_interaction_time(
                     photon_start_height = current_lower_laser_height,
@@ -1266,8 +1284,6 @@ def numerical_phases(
                     g = g,
                     gravity_gradient = gravity_gradient,
                 )
-                if abs_time_upper.is_nan():
-                    return [None, None, None, None, None, None]
 
             # elif interaction_type[index + 1] == "Single_Photon" and momentum_quanta_upper_path[index + 1] < 0:
             elif interaction_type[index + 1] == "Single_Photon":
@@ -1291,8 +1307,6 @@ def numerical_phases(
                         gravity_gradient = gravity_gradient,
                     )
 
-                    if time_delta.is_nan():
-                        return [None, None, None, None, None, None]
 
                     relative_time_counter_upper_path += time_delta
                     abs_time_upper += time_delta
@@ -1311,8 +1325,6 @@ def numerical_phases(
                         gravity_gradient = gravity_gradient,
                     )
 
-                    if time_delta.is_nan():
-                        return [None, None, None, None, None, None]
 
                     relative_time_counter_upper_path += time_delta
                     abs_time_upper += time_delta
@@ -1462,8 +1474,6 @@ def numerical_phases(
                     gravity_gradient = gravity_gradient,
                 )
 
-                if relative_time_counter_lower_path.is_nan():
-                    return [None, None, None, None, None, None]
 
                 abs_time_lower += photon_atom_interaction_time(
                     photon_start_height = current_lower_laser_height,
@@ -1477,8 +1487,6 @@ def numerical_phases(
                     gravity_gradient = gravity_gradient,
                 )
 
-                if abs_time_lower.is_nan():
-                    return [None, None, None, None, None, None]
 
             # elif interaction_type[index + 1] == "Single_Photon" and momentum_quanta_upper_path[index + 1] < 0:
             elif interaction_type[index + 1] == "Single_Photon":
@@ -1502,8 +1510,6 @@ def numerical_phases(
                         gravity_gradient = gravity_gradient,
                     )
 
-                    if time_delta.is_nan():
-                        return [None, None, None, None, None, None]
 
                     relative_time_counter_lower_path += time_delta
                     abs_time_lower += time_delta
@@ -1522,8 +1528,6 @@ def numerical_phases(
                         gravity_gradient = gravity_gradient,
                     )
 
-                    if time_delta.is_nan():
-                        return [None, None, None, None, None, None]
 
                     relative_time_counter_lower_path += time_delta
                     abs_time_lower += time_delta
@@ -2132,8 +2136,6 @@ def numerical_phases(
                 gravity_gradient = gravity_gradient,
             )
 
-            if time_delta.is_nan():
-                return [None, None, None, None, None, None]
 
             relative_time_counter_upper_path += time_delta
             abs_time_upper += time_delta
@@ -2160,8 +2162,6 @@ def numerical_phases(
                     gravity_gradient = gravity_gradient,
                 )
 
-                if relative_time_counter_upper_path.is_nan():
-                    return [None, None, None, None, None, None]
 
                 abs_time_upper += photon_atom_interaction_time(
                     photon_start_height = current_upper_laser_height,
@@ -2175,8 +2175,6 @@ def numerical_phases(
                     gravity_gradient = gravity_gradient,
                 )
 
-                if abs_time_upper.is_nan():
-                    return [None, None, None, None, None, None]
 
 
             elif laser_direction[-1] == "up":
@@ -2193,8 +2191,6 @@ def numerical_phases(
                     gravity_gradient = gravity_gradient,
                 )
 
-                if relative_time_counter_upper_path.is_nan():
-                    return [None, None, None, None, None, None]
 
                 abs_time_upper += photon_atom_interaction_time(
                     photon_start_height = current_lower_laser_height,
@@ -2208,8 +2204,6 @@ def numerical_phases(
                     gravity_gradient = gravity_gradient,
                 )
 
-                if abs_time_upper.is_nan():
-                    return [None, None, None, None, None, None]
 
 
             else:
@@ -2358,8 +2352,6 @@ def numerical_phases(
                 gravity_gradient = gravity_gradient,
             )
 
-            if relative_time_counter_lower_path.is_nan():
-                return [None, None, None, None, None, None]
 
             abs_time_lower += photon_atom_interaction_time(
                 photon_start_height = current_lower_laser_height,
@@ -2373,8 +2365,6 @@ def numerical_phases(
                 gravity_gradient = gravity_gradient,
             )
 
-            if abs_time_lower.is_nan():
-                return [None, None, None, None, None, None]
 
 
         # elif interaction_type[-1] == "Single_Photon" and momentum_quanta_upper_path[-1] < 0:
@@ -2424,8 +2414,6 @@ def numerical_phases(
                     gravity_gradient = gravity_gradient,
                 )
 
-                if relative_time_counter_lower_path.is_nan():
-                    return [None, None, None, None, None, None]
 
                 abs_time_lower += photon_atom_interaction_time(
                     photon_start_height = current_lower_laser_height,
@@ -2439,8 +2427,6 @@ def numerical_phases(
                     gravity_gradient = gravity_gradient,
                 )
 
-                if abs_time_lower.is_nan():
-                    return [None, None, None, None, None, None]
 
             else:
                 raise ValueError("Single photon pulse without light direction. Set single_photon_laser_direction of the interferometer.")
@@ -2789,6 +2775,18 @@ def numerical_phases(
         internal_state = internal_state_lower_path[-1],
     )
 
+    # Both arms have to stay between the lower laser (or the retro-reflection mirror) and the upper laser until the detection. Outside, the light cannot reach the atoms,
+    # so the phase has no meaning. With the finite speed of light, photon_atom_interaction_time already stops the calculation at a pulse that cannot reach an atom;
+    # this check also covers the calculation without it and the propagation between the pulses.
+    for arm, heights in (("upper", upper_heights_numerics), ("lower", lower_heights_numerics)):
+        lowest_height = min(entry[0] for entry in heights)
+        highest_height = max(entry[0] for entry in heights)
+        if lowest_height < lower_laser_height or highest_height > upper_laser_height:
+            raise AtomOutsideBaselineError(
+                f"The {arm} arm moves between z = {float(lowest_height):.6g} m and z = {float(highest_height):.6g} m and leaves the baseline between the lasers "
+                f"at z = {lower_laser_height} m and z = {upper_laser_height} m. Change the launch, the pulse separations or the lasers (lower_laser_height, baseline)."
+            )
+
     # ~~~~~~~~~~~~~~~~~~
     # ~~~ Kick phase ~~~
     # ~~~~~~~~~~~~~~~~~~
@@ -3061,7 +3059,7 @@ def num_phase_with_origin(
     GGN_noise: GGN_Noise_Model | None = None,
     z_offset: float = 10.0,
     time_discretization: int = 1000,
-) -> Decimal | None:
+) -> Decimal:
 
     phases = numerical_phases(
         interferometer = interferometer,
@@ -3088,9 +3086,6 @@ def num_phase_with_origin(
         z_offset = z_offset,
         time_discretization = time_discretization
     )
-
-    if phases[0] is None:
-        return None
 
     if phase_output == "Propagation":
         return phases[0]
@@ -3150,8 +3145,9 @@ def numerical_differential_interferometer(
     only_tungsten: bool = False,
     GGN_noise: GGN_Noise_Model | None = None,
     z_offset: float = 10.0,
-    print_trajectory: bool = False
-) -> Decimal | None:
+    print_trajectory: bool = False,
+    time_discretization: int = 1000
+) -> Decimal:
 
     check_same_laser_geometry(interferometer_1 = interferometer_1, interferometer_2 = interferometer_2)
 
@@ -3178,7 +3174,8 @@ def numerical_differential_interferometer(
         only_tungsten = only_tungsten,
         GGN_noise = GGN_noise,
         z_offset = z_offset,
-        print_trajectory = print_trajectory
+        print_trajectory = print_trajectory,
+        time_discretization = time_discretization
     )
 
     if2 = num_phase_with_origin(
@@ -3204,13 +3201,11 @@ def numerical_differential_interferometer(
         only_tungsten = only_tungsten,
         GGN_noise = GGN_noise,
         z_offset = z_offset,
-        print_trajectory = print_trajectory
+        print_trajectory = print_trajectory,
+        time_discretization = time_discretization
     )
 
-    if if1 is None or if2 is None:
-        return None
-    else:
-        return if1 - if2
+    return if1 - if2
 
 
 def numerical_same_interferometer_height_difference(
@@ -3237,7 +3232,9 @@ def numerical_same_interferometer_height_difference(
     only_tungsten: bool = False,
     GGN_noise: GGN_Noise_Model | None = None,
     print_trajectory: bool = False,
-) -> Decimal | None:
+    z_offset: float = 10.0,
+    time_discretization: int = 1000
+) -> Decimal:
 
     if1 = num_phase_with_origin(
         interferometer = interferometer,
@@ -3261,7 +3258,9 @@ def numerical_same_interferometer_height_difference(
         test_mass = test_mass,
         only_tungsten = only_tungsten,
         GGN_noise = GGN_noise,
-        print_trajectory = print_trajectory
+        z_offset = z_offset,
+        print_trajectory = print_trajectory,
+        time_discretization = time_discretization
     )
 
     if2 = num_phase_with_origin(
@@ -3286,13 +3285,12 @@ def numerical_same_interferometer_height_difference(
         test_mass = test_mass,
         only_tungsten = only_tungsten,
         GGN_noise = GGN_noise,
-        print_trajectory = print_trajectory
+        z_offset = z_offset,
+        print_trajectory = print_trajectory,
+        time_discretization = time_discretization
     )
 
-    if if1 is None or if2 is None:
-        return None
-    else:
-        return if1 - if2
+    return if1 - if2
 
 
 # END OF FILE

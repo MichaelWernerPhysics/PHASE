@@ -1,6 +1,8 @@
 from collections.abc import Sequence
 from decimal import Decimal
+from functools import lru_cache
 
+import numpy as np
 from numpy import pi, sin
 
 from phase.classes import GGN_Noise_Model, TestMass
@@ -84,6 +86,34 @@ def create_displacement_noise_at_time(random_phases, time):
         return noise_value
 
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~ Gravity gradient noise: modes of a realization ~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+@lru_cache(maxsize = 64)
+def _cached_ggn_modes(
+        frequencies: tuple[float, ...],
+        noise_type: str | None,
+        seed: int | None,
+        model: str
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    modes = make_modes(f = np.array(frequencies, dtype = float), type = noise_type, rng = seed, model = model)
+    for array in modes:
+        array.setflags(write = False)  # The arrays are shared by all evaluations of the potential.
+    return modes
+
+
+def ggn_modes(
+        GGN_noise: GGN_Noise_Model
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    """ Frequencies, amplitudes and phases of the modes of a GGN realization, see make_modes. They only depend on the frequencies, the noise level, the seed and the model,
+    so they are computed once per realization instead of at every evaluation of the potential. """
+    frequencies = tuple(np.asarray(GGN_noise.frequencies, dtype = float).ravel().tolist())
+    return _cached_ggn_modes(frequencies = frequencies, noise_type = GGN_noise.type, seed = GGN_noise.rng, model = GGN_noise.model)
+
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~ Gravitational potential and acceleration ~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -116,7 +146,7 @@ def model_phi(
     """ Gravitational potential energy per mass in J/kg at the height h and the time absolute_time. """
 
     if GGN_noise is not None:
-        f_modes, xi_modes, phi_modes = make_modes(f = GGN_noise.frequencies, type = GGN_noise.type, rng = GGN_noise.rng, model = GGN_noise.model)
+        f_modes, xi_modes, phi_modes = ggn_modes(GGN_noise = GGN_noise)
 
         ggn_pot = Decimal(gravity_gradient_noise_potential(
             z = h,

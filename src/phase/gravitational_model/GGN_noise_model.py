@@ -3,6 +3,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as mpl
 import numpy as np
+import scipy.constants as scp
 from obspy.signal.spectral_estimation import get_nhnm, get_nlnm  # type: ignore[import-untyped]
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -33,7 +34,7 @@ PARAMS = dict(
     s = 0.36,  # dimensionless
     q = 0.88,  # dimensionless
     cH = 205.0,  # m/s
-    G = 6.6743e-11,  # m^3/(kg s^2)
+    G = scp.G,  # m^3/(kg s^2), CODATA
 )
 
 

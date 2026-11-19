@@ -11,6 +11,7 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
+import scipy.constants as scp
 
 import phase.gravitational_model.gravitational_model as gm
 from phase.classes import (
@@ -123,7 +124,7 @@ def test_test_mass_potential_is_added():
 
     experiment = test_mass.experiment
     assert isinstance(experiment, StanfordMassSimplified)
-    expected = - 6.674 * 10 ** -11 * experiment.mass / math.sqrt(0.05 ** 2 + experiment.mean_radial_distance ** 2)
+    expected = - scp.G * experiment.mass / math.sqrt(0.05 ** 2 + experiment.mean_radial_distance ** 2)
 
     assert float(with_mass - without_mass) == pytest.approx(expected, rel = 1e-6)
 
@@ -136,6 +137,27 @@ def test_ggn_potential_is_added():
     ggn = model_phi(h = h, ideal = "homogeneous", absolute_time = t, GGN_noise = noise_model) - model_phi(h = h, ideal = "homogeneous", absolute_time = t)
 
     assert float(ggn) == pytest.approx(gravity_gradient_noise_potential(z = h, t = t, f = f, xi = xi, phi = phi, params = PARAMS, model = "seismic"), rel = 1e-12)
+
+
+''' The modes of a GGN realization are computed once and reused at every evaluation of the potential: The potential is evaluated at every time step of numerical_phases. '''
+def test_ggn_modes_are_computed_once_per_realization(monkeypatch):
+    calls: list[int] = []
+
+    def counting_make_modes(**kwargs):
+        calls.append(1)
+        return make_modes(**kwargs)
+
+    monkeypatch.setattr(gm, "make_modes", counting_make_modes)
+    gm._cached_ggn_modes.cache_clear()
+    noise_model = GGN_Noise_Model(type = "NLNM", frequencies = np.linspace(0.1, 1, 10), rng = 11, model = "seismic")
+
+    values = [model_phi(h = Decimal(h), ideal = "homogeneous", absolute_time = Decimal("0.1"), GGN_noise = noise_model) for h in (1, 2, 3)]
+    assert len(calls) == 1
+
+    # A different seed is a different realization.
+    other = GGN_Noise_Model(type = "NLNM", frequencies = np.linspace(0.1, 1, 10), rng = 12, model = "seismic")
+    assert model_phi(h = Decimal(1), ideal = "homogeneous", absolute_time = Decimal("0.1"), GGN_noise = other) != values[0]
+    assert len(calls) == 2
 
 
 # ~~~~~~~~~~~~~~~~~~~~~

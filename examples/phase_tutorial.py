@@ -191,11 +191,9 @@ g cancels in the difference: The gradiometer gives the same result for a differe
 delta_z = Decimal(5)
 gradiometer: dict[str, Any] = dict(interferometer = mzi, height_delta = delta_z, init_height = Decimal(0), init_velocity = Decimal(10), **no_fsl, **gradient)
 differential = numerical_same_interferometer_height_difference(**gradiometer)
-assert differential is not None  # None means that an atom left the baseline.
 compare("gradiometer, delta_z = 5 m", differential, - k_raman * Gamma * T ** 2 * delta_z)
 
 other_g = numerical_same_interferometer_height_difference(g = Decimal("9.81"), **gradiometer)
-assert other_g is not None
 print(f"Same gradiometer with g = 9.81 m/s^2: the differential phase changes by {float(other_g / differential - 1):.1e} (relative)")
 
 
@@ -228,7 +226,6 @@ single_noise = total(numerical_phases(random_phases_laser_noise = random_phases,
 gradiometer_settings: dict[str, Any] = dict(interferometer = noisy_mzi, height_delta = Decimal(5), init_height = Decimal(0), init_velocity = Decimal(10), include_internal_state_changes = True, **fsl)
 noisy_gradiometer = numerical_same_interferometer_height_difference(random_phases_laser_noise = random_phases, **gradiometer_settings)
 quiet_gradiometer = numerical_same_interferometer_height_difference(**gradiometer_settings)
-assert noisy_gradiometer is not None and quiet_gradiometer is not None
 print(f"Laser phase noise in a single MZI: {float(single_noise): .3e} rad, in the gradiometer: {float(noisy_gradiometer - quiet_gradiometer): .3e} rad")
 
 

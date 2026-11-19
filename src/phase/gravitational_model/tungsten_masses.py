@@ -1,8 +1,11 @@
+import os
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from numpy import array, cos, linspace, sqrt
 from scipy import integrate
+from scipy.constants import G  # Gravitational constant in m^3 / (kg s^2), CODATA
 from scipy.interpolate import interp1d
 
 from phase.classes import StanfordMass, StanfordMassSimplified, TestMass
@@ -11,8 +14,27 @@ from phase.classes import StanfordMass, StanfordMassSimplified, TestMass
 # ~~~ Tungsten Test Masses ~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# The lookup tables are stored next to this file.
+# The lookup tables of the default geometries are shipped with the package, next to this file.
 LOOKUP_TABLE_DIRECTORY = Path(__file__).resolve().parent
+
+
+def lookup_table_cache_directory() -> Path:
+
+    """ Directory of the lookup tables that PHASE creates for new test mass parameters: the environment variable PHASE_CACHE_DIR if it is set, otherwise the cache directory
+    of the user (~/Library/Caches/phase on macOS, %LOCALAPPDATA%/phase/Cache on Windows, $XDG_CACHE_HOME/phase or ~/.cache/phase otherwise).
+    New tables are not written into the package, since its directory may be read-only and is replaced by every installation. """
+
+    if os.environ.get("PHASE_CACHE_DIR"):
+        return Path(os.environ["PHASE_CACHE_DIR"])
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "phase"
+
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "phase" / "Cache"
+
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "phase"
+
 
 def test_mass_potential(
         z: float,
@@ -20,7 +42,6 @@ def test_mass_potential(
         vertical_position_of_mass: float,
     ) -> float:
 
-    G = 6.674 * 10 ** -11  # Grav. constant in N m^2 / kg^2
     rho = test_mass.mass_density
     distance = test_mass.radial_distance
     experiment = test_mass.experiment
@@ -54,7 +75,6 @@ def test_mass_acceleration(
         vertical_position_of_mass: float,
     ) -> float:
 
-    G = 6.674 * 10 ** -11  # Grav. constant in N m^2 / kg^2
     rho = test_mass.mass_density
     distance = test_mass.radial_distance
     experiment = test_mass.experiment
@@ -104,8 +124,15 @@ def test_mass_lookup_table_path(
     test_mass: TestMass,
     ) -> str:
 
-    """ The lookup table is only valid for the parameters it was created with, hence they are part of the file name. """
-    return str(LOOKUP_TABLE_DIRECTORY / ("test_mass_lookup_table_" + str(test_mass.experiment.name) + "_" + test_mass_parameters(test_mass = test_mass) + ".txt"))
+    """ The lookup table is only valid for the parameters it was created with, hence they are part of the file name. A table shipped with the package is used first,
+    all other tables live in the cache directory (see lookup_table_cache_directory). """
+    file_name = "test_mass_lookup_table_" + str(test_mass.experiment.name) + "_" + test_mass_parameters(test_mass = test_mass) + ".txt"
+
+    shipped_table = LOOKUP_TABLE_DIRECTORY / file_name
+    if shipped_table.is_file():
+        return str(shipped_table)
+
+    return str(lookup_table_cache_directory() / file_name)
 
 
 def create_new_lookup_table(
@@ -141,7 +168,11 @@ def create_new_lookup_table(
 
     print("Acceleration: New lookup table created.")
 
-    with open(test_mass_lookup_table_path(test_mass = test_mass), "w") as file:
+    path = Path(test_mass_lookup_table_path(test_mass = test_mass))
+    path.parent.mkdir(parents = True, exist_ok = True)
+    print(f"Lookup table stored in {path}")
+
+    with open(path, "w") as file:
 
         file.write("Height in [m], Potential in [J/kg], Acceleration in [m/s^2] \n")
         for height, potential, acceleration in zip(z_grid, pot_table, acc_table, strict = True):

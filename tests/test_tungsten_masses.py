@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+import scipy.constants as scp
 
 import phase.gravitational_model.tungsten_masses as tm  # Imported as module, since the functions test_mass_... would be collected as tests otherwise.
 from phase.classes import (
@@ -17,7 +18,7 @@ from phase.classes import (
     TestMass as TungstenTestMass,  # Renamed, so that pytest does not try to collect it as a test class.
 )
 
-G = 6.674 * 10 ** -11       # Value used in tungsten_masses.py
+G = scp.G                   # Gravitational constant used in tungsten_masses.py
 rho = 19.25 * 10 ** 3       # Default density of tungsten in kg/m^3
 
 
@@ -153,6 +154,40 @@ def test_lookup_tables_of_default_geometries_are_shipped(test_mass, tmp_path, mo
 
     assert path.parent == Path(tm.__file__).resolve().parent
     assert path.is_file()
+
+
+''' Lookup tables for new parameters are created in the cache directory (PHASE_CACHE_DIR, otherwise the cache directory of the user), not in the package:
+Its directory may be read-only and is replaced by every installation. '''
+def test_new_lookup_table_is_stored_in_the_cache_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("PHASE_CACHE_DIR", str(tmp_path))
+    test_mass = TungstenTestMass(experiment = StanfordMassSimplified(mass = 2.0), radial_distance = 0.0)
+    path = Path(tm.test_mass_lookup_table_path(test_mass = test_mass))
+
+    assert path.parent == tmp_path
+    assert not path.exists()
+
+    potential, _ = tm.initialize_test_mass(test_mass = test_mass)
+
+    assert path.is_file()
+    assert not (tm.LOOKUP_TABLE_DIRECTORY / path.name).exists()
+    assert float(potential(0.5)) == pytest.approx(tm.test_mass_potential(z = 0.5, test_mass = test_mass, vertical_position_of_mass = 0), rel = 1e-9)
+
+
+def test_cache_directory_is_not_in_the_package(monkeypatch):
+    monkeypatch.delenv("PHASE_CACHE_DIR", raising = False)
+    cache_directory = tm.lookup_table_cache_directory()
+
+    assert cache_directory != tm.LOOKUP_TABLE_DIRECTORY
+    assert tm.LOOKUP_TABLE_DIRECTORY not in cache_directory.parents
+
+
+''' The simplified ring is centred on the baseline. Its potential has no radial distance, so a radial distance is rejected instead of being ignored. '''
+def test_simplified_ring_rejects_radial_distance():
+    with pytest.raises(ValueError, match = "centred on the baseline"):
+        TungstenTestMass(experiment = StanfordMassSimplified(), radial_distance = 0.1)
+
+    TungstenTestMass(experiment = StanfordMassSimplified(), radial_distance = 0)
+    TungstenTestMass(experiment = StanfordMass(), radial_distance = 0.1)
 
 
 # END OF FILE

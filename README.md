@@ -64,7 +64,8 @@ gradiometers, gravitational waves, laser phase noise, test masses, tides and gra
   `interaction_type` and `detunings` have P entries and `time_intervals` has P - 1 entries. Single photon pulses need the light direction, `"Up"` or `"Down"`, if the finite speed of light is included.
   `k_vector` has no default: the k-vector of the photon for single photon pulses (with the finite speed of light, k c has to equal `clock_frequency`), `[k_1, k_2]` for two-photon pulses.
   See [src/phase/geometries.py](src/phase/geometries.py) for examples.
-- **Result:** `numerical_phases` returns `[propagation phase, separation phase, laser phase, upper arm trajectory, lower arm trajectory]`. The phases are `None` if an atom leaves the baseline.
+- **Result:** `numerical_phases` returns `[propagation phase, separation phase, laser phase, upper arm trajectory, lower arm trajectory]`. If an atom leaves the baseline between the lasers
+  before the detection, the phase has no meaning and `numerical_phases` raises an `AtomOutsideBaselineError` (a `ValueError`).
 - **Accuracy:** The phases are evaluated with 45 significant digits. The trajectories are integrated to first order in the time step, with `time_discretization = 1000` steps per pulse separation.
   This is sufficient for most signals. For local potentials (e.g. test masses) and small corrections (e.g. the finite speed of light), increase it or extrapolate 2 φ(2n) - φ(n).
 

@@ -26,6 +26,7 @@ from phase.gravitational_model import (
 )
 from phase.laser_phase_noise_model import set_white_phase_noise as set_white_phase_noise
 from phase.numerical_interferometer import (
+    AtomOutsideBaselineError as AtomOutsideBaselineError,
     num_phase_with_origin as num_phase_with_origin,
     numerical_differential_interferometer as numerical_differential_interferometer,
     numerical_phases as numerical_phases,
