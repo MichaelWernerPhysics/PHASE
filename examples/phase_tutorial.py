@@ -117,7 +117,7 @@ section("2. Gravity gradient")
 with the recoil velocity v_rec = hbar k_eff / m. It depends on the launch conditions: The atoms sample the gradient along their trajectory.
 The formula is first order in Gamma: The terms of order Gamma^2 T^2 make up the remaining deviation of ~1e-6. """
 
-gradient: dict[str, Any] = dict(ideal_potential = "constant gradient", ideal_trajectory = "constant gradient")
+gradient: dict[str, Any] = dict(gravity_model = "constant gradient")
 for z0, v0 in ((0, 10), (2, 12)):
     homogeneous = total(numerical_phases(interferometer = mzi, initial_height = z0, initial_velocity = v0, **no_fsl))
     with_gradient = total(numerical_phases(interferometer = mzi, initial_height = z0, initial_velocity = v0, **no_fsl, **gradient))

@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from decimal import Decimal
 from functools import lru_cache
+from typing import Literal
 
 import numpy as np
 from numpy import pi, sin
@@ -29,6 +30,9 @@ Local sources (tungsten test masses), gravity gradient noise and additional glob
 # Standard gravity (CGPM 1901) in m/s^2 and the free-air gradient of the Earth in 1/s^2.
 DEFAULT_G = Decimal("9.80665")
 DEFAULT_GRAVITY_GRADIENT = Decimal("3.086e-6")
+
+# Model of the field: "homogeneous" or "constant gradient". The functions accept any capitalization.
+GravityModel = Literal["homogeneous", "constant gradient"]
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -121,8 +125,8 @@ def ggn_modes(
 def model_phi(
         # Height argument in m.
         h: Decimal | float | int,
-        # Model type argument, either "homogeneous" or "constant gradient".
-        ideal: str,
+        # Model of the field, either "homogeneous" or "constant gradient" (not case-sensitive).
+        model: GravityModel,
         # Time argument is s.
         absolute_time: Decimal | float | int,
         # Additional global acceleration in m/s^2. Example: Change in g due to the Sun or the moon.
@@ -182,21 +186,21 @@ def model_phi(
     if only_tungsten:
         return tungsten_potential + ggn_pot
 
-    if ideal.lower() == "homogeneous":
+    if model.lower() == "homogeneous":
         return (g + additional_global_acceleration) * h + tungsten_potential + ggn_pot
 
-    elif ideal.lower() == "constant gradient":
+    elif model.lower() == "constant gradient":
         return (g + additional_global_acceleration) * h - gravity_gradient / 2 * h ** 2 + tungsten_potential + ggn_pot
 
     else:
-        raise ValueError(f"Unknown gravitational model {ideal!r}. It has to be either 'homogeneous' or 'constant gradient'.")
+        raise ValueError(f"Unknown gravitational model {model!r}. It has to be either 'homogeneous' or 'constant gradient'.")
 
 
 def model_g(
         # Height argument in m.
         h: Decimal,
-        # Model type argument, either "homogeneous" or "constant gradient".
-        ideal: str,
+        # Model of the field, either "homogeneous" or "constant gradient" (not case-sensitive).
+        model: GravityModel,
         # Time argument is s.
         absolute_time: Decimal,
         # Additional global acceleration in m/s^2. Example: Change in g due to the Sun or the moon.
@@ -228,14 +232,14 @@ def model_g(
     if only_tungsten:
         return tungsten_acceleration
 
-    if ideal.lower() == "homogeneous":
+    if model.lower() == "homogeneous":
         return g + additional_global_acceleration + tungsten_acceleration
 
-    elif ideal.lower() == "constant gradient":
+    elif model.lower() == "constant gradient":
         return g - gravity_gradient * h + additional_global_acceleration + tungsten_acceleration
 
     else:
-        raise ValueError(f"Unknown gravitational model {ideal!r}. It has to be either 'homogeneous' or 'constant gradient'.")
+        raise ValueError(f"Unknown gravitational model {model!r}. It has to be either 'homogeneous' or 'constant gradient'.")
 
 
 # END OF FILE

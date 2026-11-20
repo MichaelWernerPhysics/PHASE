@@ -1,5 +1,8 @@
+import functools
 import warnings
+from collections.abc import Callable
 from decimal import Decimal
+from typing import Any, cast
 
 import scipy.constants as spc
 
@@ -16,6 +19,7 @@ from phase.classes import (
 from phase.gravitational_model import (
     DEFAULT_G,
     DEFAULT_GRAVITY_GRADIENT,
+    GravityModel,
     create_displacement_noise_at_time,
     model_g,
     model_phi,
@@ -25,6 +29,34 @@ from phase.laser_phase_noise_model import phase_noise
 
 class AtomOutsideBaselineError(ValueError):
     """ An atom leaves the baseline between the lower laser (or the retro-reflection mirror) and the upper laser. The light cannot reach it there, so the phase has no meaning. """
+
+
+def accept_deprecated_gravity_model_names[**P, R](function: Callable[P, R]) -> Callable[P, R]:
+
+    """ Accepts the former names ideal_potential and ideal_trajectory with a DeprecationWarning, until version 1.0.
+    Both former parameters had the default "homogeneous", independently of each other. A missing one is therefore set to "homogeneous", not to the other one,
+    so that old calls give the same results. """
+
+    @functools.wraps(function)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        former = {name: kwargs.pop(name) for name in ("ideal_potential", "ideal_trajectory") if name in kwargs}
+
+        if former:
+            if "gravity_model" in kwargs or "trajectory_gravity_model" in kwargs:
+                raise TypeError("Pass either gravity_model and trajectory_gravity_model or the former names ideal_potential and ideal_trajectory, not both.")
+
+            warnings.warn(
+                "ideal_potential and ideal_trajectory are deprecated and will be removed in version 1.0. Use gravity_model for the field, "
+                "and trajectory_gravity_model only if the trajectories need a different model.",
+                DeprecationWarning,
+                stacklevel = 2,
+            )
+            kwargs["gravity_model"] = former.get("ideal_potential", "homogeneous")
+            kwargs["trajectory_gravity_model"] = former.get("ideal_trajectory", "homogeneous")
+
+        return function(*args, **kwargs)
+
+    return cast(Callable[P, R], wrapper)
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -72,7 +104,7 @@ def photon_trajectory(
 def atom_trajectory(
     start_height: Decimal,
     start_velocity: Decimal,
-    ideal: str,
+    model: GravityModel,
     time_step: Decimal,
     absolute_time: Decimal,
     additional_acceleration: Decimal,
@@ -86,7 +118,7 @@ def atom_trajectory(
         start_height + start_velocity * time_step - Decimal(0.5)
         * model_g(
             h = start_height,
-            ideal = ideal,
+            model = model,
             absolute_time = absolute_time,
             additional_global_acceleration = additional_acceleration,
             g = g,
@@ -102,7 +134,7 @@ def atom_trajectory(
 def atom_velocity(
     start_height: Decimal,
     start_velocity: Decimal,
-    ideal: str,
+    model: GravityModel,
     time_step: Decimal,
     absolute_time: Decimal,
     additional_acceleration: Decimal,
@@ -116,7 +148,7 @@ def atom_velocity(
         start_velocity
         - model_g(
             h = start_height,
-            ideal = ideal,
+            model = model,
             absolute_time = absolute_time,
             additional_global_acceleration = additional_acceleration,
             g = g,
@@ -133,7 +165,7 @@ def photon_atom_interaction_time(
     light_direction: str,
     target_height: Decimal,
     target_velocity: Decimal,
-    ideal_trajectory: str,
+    trajectory_gravity_model: GravityModel,
     absolute_time: Decimal = Decimal(0),
     add_acceleration: Decimal = Decimal(0),
     g: Decimal = DEFAULT_G,
@@ -164,7 +196,7 @@ def photon_atom_interaction_time(
                 new_height = atom_trajectory(
                     start_height = target_height,
                     start_velocity = target_velocity,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = dt,
                     absolute_time = abs_time,
                     additional_acceleration = add_acceleration,
@@ -174,7 +206,7 @@ def photon_atom_interaction_time(
                 new_vel = atom_velocity(
                     start_height = target_height,
                     start_velocity = target_velocity,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = dt,
                     absolute_time = abs_time,
                     additional_acceleration = add_acceleration,
@@ -206,7 +238,7 @@ def photon_atom_interaction_time(
                 new_height = atom_trajectory(
                     start_height = target_height,
                     start_velocity = target_velocity,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = dt,
                     absolute_time = abs_time,
                     additional_acceleration = add_acceleration,
@@ -216,7 +248,7 @@ def photon_atom_interaction_time(
                 new_vel = atom_velocity(
                     start_height = target_height,
                     start_velocity = target_velocity,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = dt,
                     absolute_time = abs_time,
                     additional_acceleration = add_acceleration,
@@ -308,6 +340,7 @@ def validate_single_photon_pulses_with_fsl(
 
 
 # Function that calculates the numerical phase shift of an interferometer, given the initial conditions and the interferometer object and some numerical values for the calculation.
+@accept_deprecated_gravity_model_names
 def numerical_phases(
     # Interferometer class object of interest.
     interferometer: Interferometer,
@@ -315,10 +348,11 @@ def numerical_phases(
     initial_height: Decimal | float | int,
     # Velocity of the atoms at the start of the interferometer sequence at t=0.
     initial_velocity: Decimal | float | int,
-    # Gravitational model of the potential (propagation phase). Options: "homogeneous" or "constant gradient", see gravitational_model.
-    ideal_potential: str = "Homogeneous",
-    # Gravitational model of the atomic trajectories. Options: "homogeneous" or "constant gradient".
-    ideal_trajectory: str = "Homogeneous",
+    # Model of the gravitational field: "homogeneous" or "constant gradient" (not case-sensitive), see gravitational_model. It enters the potential (propagation phase) and the trajectories.
+    gravity_model: GravityModel = "homogeneous",
+    # Model of the field for the trajectories only, if it differs from gravity_model. None means the same as gravity_model.
+    # Example: gravity_model = "constant gradient" with trajectory_gravity_model = "homogeneous" evaluates the gradient along the unperturbed trajectories.
+    trajectory_gravity_model: GravityModel | None = None,
     # Time after the last laser pulse until the detection, counted from the interaction of the later arm with the last pulse. Both arms end at this time, the earlier arm catches up.
     # If zero, the detection happens directly after the last pulse interacted with both arms.
     detection_time: Decimal | float | int = Decimal(0),
@@ -376,6 +410,10 @@ def numerical_phases(
     absolute_time_offset = Decimal(absolute_time_offset)
     g = Decimal(g)
     gravity_gradient = Decimal(gravity_gradient)
+
+    # The trajectories use the field of the potential, unless they have their own model.
+    if trajectory_gravity_model is None:
+        trajectory_gravity_model = gravity_model
 
     """ Number of time segments for each path of free propagation (argument time_discretization).
     Example: T = 1s, then each time step in the free propagation is 1ms, if time_discretization = 1000.
@@ -637,7 +675,7 @@ def numerical_phases(
             atom_height = atom_trajectory(
                 start_height = virtual_atomic_height,
                 start_velocity = initial_velocity,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
@@ -649,7 +687,7 @@ def numerical_phases(
             atom_vel = atom_velocity(
                 start_height = virtual_atomic_height,
                 start_velocity = initial_velocity,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
@@ -669,7 +707,7 @@ def numerical_phases(
                 light_direction = "up",
                 target_height = atom_height,
                 target_velocity = atom_vel,
-                ideal_trajectory = ideal_trajectory,
+                trajectory_gravity_model = trajectory_gravity_model,
                 absolute_time = abs_time_upper,
                 add_acceleration = add_acceleration,
                 g = g,
@@ -696,7 +734,7 @@ def numerical_phases(
                     light_direction = "down",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -714,7 +752,7 @@ def numerical_phases(
                     light_direction = "up",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -739,7 +777,7 @@ def numerical_phases(
         first_interaction_height = atom_trajectory(
             start_height = initial_height,
             start_velocity = initial_velocity,
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             time_step = relative_time_counter,
             absolute_time = abs_time_upper,
             additional_acceleration = add_acceleration,
@@ -751,7 +789,7 @@ def numerical_phases(
         first_interaction_velocity = atom_velocity(
             start_height = initial_height,
             start_velocity = initial_velocity,
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             time_step = relative_time_counter,
             absolute_time = abs_time_upper,
             additional_acceleration = add_acceleration,
@@ -972,7 +1010,7 @@ def numerical_phases(
                 start_height = first_interaction_height,
                 start_velocity = kick_velocity_upper,
                 time_step = time_window,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
                 g = g,
@@ -989,7 +1027,7 @@ def numerical_phases(
             start_height = upper_heights_numerics[-1][0],
             start_velocity = kick_velocity_upper,
             time_step = time_window,
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             absolute_time = abs_time_upper,
             additional_acceleration = add_acceleration,
             g = g,
@@ -1012,7 +1050,7 @@ def numerical_phases(
                 start_height = first_interaction_height,
                 start_velocity = kick_velocity_lower,
                 time_step = time_window,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
                 g = g,
@@ -1029,7 +1067,7 @@ def numerical_phases(
             start_height = lower_heights_numerics[-1][0],
             start_velocity = kick_velocity_lower,
             time_step = time_window,
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             absolute_time = abs_time_lower,
             additional_acceleration = add_acceleration,
             g = g,
@@ -1051,7 +1089,7 @@ def numerical_phases(
                     start_height = upper_heights_numerics[-1][0],
                     start_velocity = upper_velocities_numerics[-1],
                     time_step = time_window,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     additional_acceleration = add_acceleration,
                     g = g,
@@ -1069,7 +1107,7 @@ def numerical_phases(
                 start_height = upper_heights_numerics[-1][0],
                 start_velocity = upper_velocities_numerics[-1],
                 time_step = time_window,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
                 g = g,
@@ -1087,7 +1125,7 @@ def numerical_phases(
                     start_height = lower_heights_numerics[-1][0],
                     start_velocity = lower_velocities_numerics[-1],
                     time_step = time_window,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     absolute_time = abs_time_lower,
                     additional_acceleration = add_acceleration,
                     g = g,
@@ -1104,7 +1142,7 @@ def numerical_phases(
                 start_height = lower_heights_numerics[-1][0],
                 start_velocity = lower_velocities_numerics[-1],
                 time_step = time_window,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
                 g = g,
@@ -1125,7 +1163,7 @@ def numerical_phases(
             atom_trajectory(
                 start_height = upper_heights_numerics[-1][0],
                 start_velocity = upper_velocities_numerics[-1],
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = time_till_next_laser_pulse_upper,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
@@ -1142,7 +1180,7 @@ def numerical_phases(
         atom_velocity(
             start_height = upper_heights_numerics[-1][0],
             start_velocity = upper_velocities_numerics[-1],
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             time_step = time_till_next_laser_pulse_upper,
             absolute_time = abs_time_upper,
             additional_acceleration = add_acceleration,
@@ -1157,7 +1195,7 @@ def numerical_phases(
             atom_trajectory(
                 start_height = lower_heights_numerics[-1][0],
                 start_velocity = lower_velocities_numerics[-1],
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = time_till_next_laser_pulse_lower,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
@@ -1174,7 +1212,7 @@ def numerical_phases(
         atom_velocity(
             start_height = lower_heights_numerics[-1][0],
             start_velocity = lower_velocities_numerics[-1],
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             time_step = time_till_next_laser_pulse_lower,
             absolute_time = abs_time_lower,
             additional_acceleration = add_acceleration,
@@ -1237,7 +1275,7 @@ def numerical_phases(
                 atom_height_upper_path = atom_trajectory(
                     start_height = virtual_upper_atomic_height,
                     start_velocity = atom_vel_upper_path_before,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = relative_time_counter_upper_path,
                     absolute_time = abs_time_upper,
                     additional_acceleration = add_acceleration,
@@ -1249,7 +1287,7 @@ def numerical_phases(
                 atom_vel_upper_path = atom_velocity(
                     start_height = atom_height_upper_path_before,
                     start_velocity = atom_vel_upper_path_before,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = relative_time_counter_upper_path,
                     absolute_time = abs_time_upper,
                     additional_acceleration = add_acceleration,
@@ -1269,7 +1307,7 @@ def numerical_phases(
                     light_direction = "up",
                     target_height = atom_height_upper_path,
                     target_velocity = atom_vel_upper_path,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -1281,7 +1319,7 @@ def numerical_phases(
                     light_direction = "up",
                     target_height = atom_height_upper_path,
                     target_velocity = atom_vel_upper_path,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -1303,7 +1341,7 @@ def numerical_phases(
                         light_direction = "down",
                         target_height = atom_height,
                         target_velocity = atom_vel,
-                        ideal_trajectory = ideal_trajectory,
+                        trajectory_gravity_model = trajectory_gravity_model,
                         absolute_time = abs_time_upper,
                         add_acceleration = add_acceleration,
                         g = g,
@@ -1321,7 +1359,7 @@ def numerical_phases(
                         light_direction = "up",
                         target_height = atom_height,
                         target_velocity = atom_vel,
-                        ideal_trajectory = ideal_trajectory,
+                        trajectory_gravity_model = trajectory_gravity_model,
                         absolute_time = abs_time_upper,
                         add_acceleration = add_acceleration,
                         g = g,
@@ -1341,7 +1379,7 @@ def numerical_phases(
             next_interaction_height_upper = atom_trajectory(
                 start_height = atom_height_upper_path_before,
                 start_velocity = atom_vel_upper_path_before,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter_upper_path,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
@@ -1353,7 +1391,7 @@ def numerical_phases(
             next_interaction_velocity_upper = atom_velocity(
                 start_height = atom_height_upper_path_before,
                 start_velocity = atom_vel_upper_path_before,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter_upper_path,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
@@ -1438,7 +1476,7 @@ def numerical_phases(
                 atom_height_lower_path = atom_trajectory(
                     start_height = virtual_lower_atomic_height,
                     start_velocity = atom_vel_lower_path_before,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = relative_time_counter_lower_path,
                     absolute_time = abs_time_lower,
                     additional_acceleration = add_acceleration,
@@ -1450,7 +1488,7 @@ def numerical_phases(
                 atom_vel_lower_path = atom_velocity(
                     start_height = atom_height_lower_path_before,
                     start_velocity = atom_vel_lower_path_before,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = relative_time_counter_lower_path,
                     absolute_time = abs_time_lower,
                     additional_acceleration = add_acceleration,
@@ -1470,7 +1508,7 @@ def numerical_phases(
                     light_direction = "up",
                     target_height = atom_height_lower_path,
                     target_velocity = atom_vel_lower_path,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_lower,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -1483,7 +1521,7 @@ def numerical_phases(
                     light_direction = "up",
                     target_height = atom_height_lower_path,
                     target_velocity = atom_vel_lower_path,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_lower,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -1506,7 +1544,7 @@ def numerical_phases(
                         light_direction = "down",
                         target_height = atom_height,
                         target_velocity = atom_vel,
-                        ideal_trajectory = ideal_trajectory,
+                        trajectory_gravity_model = trajectory_gravity_model,
                         absolute_time = abs_time_lower,
                         add_acceleration = add_acceleration,
                         g = g,
@@ -1524,7 +1562,7 @@ def numerical_phases(
                         light_direction = "up",
                         target_height = atom_height,
                         target_velocity = atom_vel,
-                        ideal_trajectory = ideal_trajectory,
+                        trajectory_gravity_model = trajectory_gravity_model,
                         absolute_time = abs_time_lower,
                         add_acceleration = add_acceleration,
                         g = g,
@@ -1544,7 +1582,7 @@ def numerical_phases(
             next_interaction_height_lower = atom_trajectory(
                 start_height = atom_height_lower_path_before,
                 start_velocity = atom_vel_lower_path_before,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter_lower_path,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
@@ -1556,7 +1594,7 @@ def numerical_phases(
             next_interaction_velocity_lower = atom_velocity(
                 start_height = atom_height_lower_path_before,
                 start_velocity = atom_vel_lower_path_before,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter_lower_path,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
@@ -1734,7 +1772,7 @@ def numerical_phases(
                     atom_trajectory(
                         start_height = upper_heights_numerics[-1][0],
                         start_velocity = upper_velocities_numerics[-1],
-                        ideal = ideal_trajectory,
+                        model = trajectory_gravity_model,
                         time_step = travel_time_laser_1_upper,
                         absolute_time = abs_time_upper,
                         additional_acceleration = add_acceleration,
@@ -1751,7 +1789,7 @@ def numerical_phases(
                 atom_velocity(
                     start_height = upper_heights_numerics[-1][0],
                     start_velocity = upper_velocities_numerics[-1],
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = travel_time_laser_1_upper,
                     absolute_time = abs_time_upper,
                     additional_acceleration = add_acceleration,
@@ -1767,7 +1805,7 @@ def numerical_phases(
                     atom_trajectory(
                         start_height = lower_heights_numerics[-1][0],
                         start_velocity = lower_velocities_numerics[-1],
-                        ideal = ideal_trajectory,
+                        model = trajectory_gravity_model,
                         time_step = travel_time_laser_1_lower,
                         absolute_time = abs_time_lower,
                         additional_acceleration = add_acceleration,
@@ -1784,7 +1822,7 @@ def numerical_phases(
                 atom_velocity(
                     start_height = lower_heights_numerics[-1][0],
                     start_velocity = lower_velocities_numerics[-1],
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = travel_time_laser_1_lower,
                     absolute_time = abs_time_lower,
                     additional_acceleration = add_acceleration,
@@ -1826,7 +1864,7 @@ def numerical_phases(
                     start_height = next_interaction_height_upper,
                     start_velocity = kick_velocity_upper,
                     time_step = time_window,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     additional_acceleration = add_acceleration,
                     g = g,
@@ -1843,7 +1881,7 @@ def numerical_phases(
                 start_height = upper_heights_numerics[-1][0],
                 start_velocity = kick_velocity_upper,
                 time_step = time_window,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
                 g = g,
@@ -1879,7 +1917,7 @@ def numerical_phases(
                     start_height = next_interaction_height_lower,
                     start_velocity = kick_velocity_lower,
                     time_step = time_window,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     absolute_time = abs_time_lower,
                     additional_acceleration = add_acceleration,
                     g = g,
@@ -1896,7 +1934,7 @@ def numerical_phases(
                 start_height = lower_heights_numerics[-1][0],
                 start_velocity = kick_velocity_lower,
                 time_step = time_window,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
                 g = g,
@@ -1920,7 +1958,7 @@ def numerical_phases(
                         start_height = upper_heights_numerics[-1][0],
                         start_velocity = upper_velocities_numerics[-1],
                         time_step = time_window,
-                        ideal = ideal_trajectory,
+                        model = trajectory_gravity_model,
                         absolute_time = abs_time_upper,
                         additional_acceleration = add_acceleration,
                         g = g,
@@ -1937,7 +1975,7 @@ def numerical_phases(
                     start_height = upper_heights_numerics[-1][0],
                     start_velocity = upper_velocities_numerics[-1],
                     time_step = time_window,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     additional_acceleration = add_acceleration,
                     g = g,
@@ -1957,7 +1995,7 @@ def numerical_phases(
                         start_height = lower_heights_numerics[-1][0],
                         start_velocity = lower_velocities_numerics[-1],
                         time_step = time_window,
-                        ideal = ideal_trajectory,
+                        model = trajectory_gravity_model,
                         absolute_time = abs_time_lower,
                         additional_acceleration = add_acceleration,
                         g = g,
@@ -1974,7 +2012,7 @@ def numerical_phases(
                     start_height = lower_heights_numerics[-1][0],
                     start_velocity = lower_velocities_numerics[-1],
                     time_step = time_window,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     absolute_time = abs_time_lower,
                     additional_acceleration = add_acceleration,
                     g = g,
@@ -1994,7 +2032,7 @@ def numerical_phases(
                 atom_trajectory(
                     start_height = upper_heights_numerics[-1][0],
                     start_velocity = upper_velocities_numerics[-1],
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = upper_time_till_next_laser_pulse,
                     absolute_time = abs_time_upper,
                     additional_acceleration = add_acceleration,
@@ -2011,7 +2049,7 @@ def numerical_phases(
             atom_velocity(
                 start_height = upper_heights_numerics[-1][0],
                 start_velocity = upper_velocities_numerics[-1],
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = upper_time_till_next_laser_pulse,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
@@ -2026,7 +2064,7 @@ def numerical_phases(
                 atom_trajectory(
                     start_height = lower_heights_numerics[-1][0],
                     start_velocity = lower_velocities_numerics[-1],
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = lower_time_till_next_laser_pulse,
                     absolute_time = abs_time_lower,
                     additional_acceleration = add_acceleration,
@@ -2043,7 +2081,7 @@ def numerical_phases(
             atom_velocity(
                 start_height = lower_heights_numerics[-1][0],
                 start_velocity = lower_velocities_numerics[-1],
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = lower_time_till_next_laser_pulse,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
@@ -2100,7 +2138,7 @@ def numerical_phases(
             atom_height_upper_path = atom_trajectory(
                 start_height = virtual_upper_atomic_height,
                 start_velocity = atom_vel_upper_path_before,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter_upper_path,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
@@ -2112,7 +2150,7 @@ def numerical_phases(
             atom_vel_upper_path = atom_velocity(
                 start_height = atom_height_upper_path_before,
                 start_velocity = atom_vel_upper_path_before,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter_upper_path,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
@@ -2132,7 +2170,7 @@ def numerical_phases(
                 light_direction = "up",
                 target_height = atom_height_upper_path,
                 target_velocity = atom_vel_upper_path,
-                ideal_trajectory = ideal_trajectory,
+                trajectory_gravity_model = trajectory_gravity_model,
                 absolute_time = abs_time_upper,
                 add_acceleration = add_acceleration,
                 g = g,
@@ -2158,7 +2196,7 @@ def numerical_phases(
                     light_direction = "down",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -2171,7 +2209,7 @@ def numerical_phases(
                     light_direction = "down",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -2187,7 +2225,7 @@ def numerical_phases(
                     light_direction = "up",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -2200,7 +2238,7 @@ def numerical_phases(
                     light_direction = "up",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_upper,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -2218,7 +2256,7 @@ def numerical_phases(
         last_interaction_height_upper = atom_trajectory(
             start_height = atom_height_upper_path_before,
             start_velocity = atom_vel_upper_path_before,
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             time_step = relative_time_counter_upper_path,
             absolute_time = abs_time_upper,
             additional_acceleration = add_acceleration,
@@ -2230,7 +2268,7 @@ def numerical_phases(
         last_interaction_velocity_upper = atom_velocity(
             start_height = atom_height_upper_path_before,
             start_velocity = atom_vel_upper_path_before,
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             time_step = relative_time_counter_upper_path,
             absolute_time = abs_time_upper,
             additional_acceleration = add_acceleration,
@@ -2316,7 +2354,7 @@ def numerical_phases(
             atom_height_lower_path = atom_trajectory(
                 start_height = virtual_lower_atomic_height,
                 start_velocity = atom_vel_lower_path_before,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter_lower_path,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
@@ -2328,7 +2366,7 @@ def numerical_phases(
             atom_vel_lower_path = atom_velocity(
                 start_height = atom_height_lower_path_before,
                 start_velocity = atom_vel_lower_path_before,
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = relative_time_counter_lower_path,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
@@ -2348,7 +2386,7 @@ def numerical_phases(
                 light_direction = "up",
                 target_height = atom_height_lower_path,
                 target_velocity = atom_vel_lower_path,
-                ideal_trajectory = ideal_trajectory,
+                trajectory_gravity_model = trajectory_gravity_model,
                 absolute_time = abs_time_lower,
                 add_acceleration = add_acceleration,
                 g = g,
@@ -2361,7 +2399,7 @@ def numerical_phases(
                 light_direction = "up",
                 target_height = atom_height_lower_path,
                 target_velocity = atom_vel_lower_path,
-                ideal_trajectory = ideal_trajectory,
+                trajectory_gravity_model = trajectory_gravity_model,
                 absolute_time = abs_time_lower,
                 add_acceleration = add_acceleration,
                 g = g,
@@ -2385,7 +2423,7 @@ def numerical_phases(
                     light_direction = "down",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_lower,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -2396,7 +2434,7 @@ def numerical_phases(
                     light_direction = "down",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_lower,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -2410,7 +2448,7 @@ def numerical_phases(
                     light_direction = "up",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_lower,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -2423,7 +2461,7 @@ def numerical_phases(
                     light_direction = "up",
                     target_height = atom_height,
                     target_velocity = atom_vel,
-                    ideal_trajectory = ideal_trajectory,
+                    trajectory_gravity_model = trajectory_gravity_model,
                     absolute_time = abs_time_lower,
                     add_acceleration = add_acceleration,
                     g = g,
@@ -2440,7 +2478,7 @@ def numerical_phases(
         last_interaction_height_lower = atom_trajectory(
             start_height = atom_height_lower_path_before,
             start_velocity = atom_vel_lower_path_before,
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             time_step = relative_time_counter_lower_path,
             absolute_time = abs_time_lower,
             additional_acceleration = add_acceleration,
@@ -2452,7 +2490,7 @@ def numerical_phases(
         last_interaction_velocity_lower = atom_velocity(
             start_height = atom_height_lower_path_before,
             start_velocity = atom_vel_lower_path_before,
-            ideal = ideal_trajectory,
+            model = trajectory_gravity_model,
             time_step = relative_time_counter_lower_path,
             absolute_time = abs_time_lower,
             additional_acceleration = add_acceleration,
@@ -2626,7 +2664,7 @@ def numerical_phases(
                 atom_trajectory(
                     start_height = upper_heights_numerics[-1][0],
                     start_velocity = upper_velocities_numerics[-1],
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = travel_time_laser_1_upper,
                     absolute_time = abs_time_upper,
                     additional_acceleration = add_acceleration,
@@ -2643,7 +2681,7 @@ def numerical_phases(
             atom_velocity(
                 start_height = upper_heights_numerics[-1][0],
                 start_velocity = upper_velocities_numerics[-1],
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = travel_time_laser_1_upper,
                 absolute_time = abs_time_upper,
                 additional_acceleration = add_acceleration,
@@ -2658,7 +2696,7 @@ def numerical_phases(
                 atom_trajectory(
                     start_height = lower_heights_numerics[-1][0],
                     start_velocity = lower_velocities_numerics[-1],
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     time_step = travel_time_laser_1_lower,
                     absolute_time = abs_time_lower,
                     additional_acceleration = add_acceleration,
@@ -2675,7 +2713,7 @@ def numerical_phases(
             atom_velocity(
                 start_height = lower_heights_numerics[-1][0],
                 start_velocity = lower_velocities_numerics[-1],
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = travel_time_laser_1_lower,
                 absolute_time = abs_time_lower,
                 additional_acceleration = add_acceleration,
@@ -2735,7 +2773,7 @@ def numerical_phases(
             height = atom_trajectory(
                 start_height = heights[-1][0],
                 start_velocity = velocities[-1],
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = step,
                 absolute_time = absolute_time,
                 additional_acceleration = add_acceleration,
@@ -2747,7 +2785,7 @@ def numerical_phases(
             velocity = atom_velocity(
                 start_height = height,
                 start_velocity = velocities[-1],
-                ideal = ideal_trajectory,
+                model = trajectory_gravity_model,
                 time_step = step,
                 absolute_time = absolute_time,
                 additional_acceleration = add_acceleration,
@@ -2821,7 +2859,7 @@ def numerical_phases(
         """ Potential energy per mass phi(z, t) of the propagation phase. With only_tungsten, only the test masses (and the GGN) enter. """
         return model_phi(
             h = height,
-            ideal = ideal_potential,
+            model = gravity_model,
             absolute_time = absolute_time,
             additional_global_acceleration = add_acceleration,
             tungsten_positions = tungsten_positions,
@@ -2859,7 +2897,7 @@ def numerical_phases(
             if step > 0:
                 acceleration = model_g(
                     h = start_height,
-                    ideal = ideal_trajectory,
+                    model = trajectory_gravity_model,
                     absolute_time = start_time,
                     additional_global_acceleration = add_acceleration,
                     g = g,
@@ -2953,12 +2991,13 @@ def numerical_phases(
 
 
 # Outputs the phase shift of a single interferometer and returns a specific phase shift origin, if requested
+@accept_deprecated_gravity_model_names
 def num_phase_with_origin(
     interferometer: Interferometer,
     init_height: Decimal | float | int,
     init_velocity: Decimal | float | int,
-    ideal_potential: str = "Homogeneous",
-    ideal_trajectory: str = "Homogeneous",
+    gravity_model: GravityModel = "homogeneous",
+    trajectory_gravity_model: GravityModel | None = None,
     phase_output: str = "All",
     detection_time: Decimal = Decimal(0),
     absolute_time_offset: Decimal = Decimal(0),
@@ -2984,8 +3023,8 @@ def num_phase_with_origin(
         interferometer = interferometer,
         initial_height = init_height,
         initial_velocity = init_velocity,
-        ideal_potential = ideal_potential,
-        ideal_trajectory = ideal_trajectory,
+        gravity_model = gravity_model,
+        trajectory_gravity_model = trajectory_gravity_model,
         detection_time = detection_time,
         absolute_time_offset = absolute_time_offset,
         random_phases_laser_noise = random_phases_laser_noise,
@@ -3040,13 +3079,14 @@ def check_same_laser_geometry(
 
 
 # Output the phase shift of a differential measurement between two interferometers
+@accept_deprecated_gravity_model_names
 def numerical_differential_interferometer(
     interferometer_1: Interferometer,
     interferometer_2: Interferometer,
     init_height: Decimal,
     init_velocity: Decimal,
-    ideal_potential: str = "Homogeneous",
-    ideal_trajectory: str = "Homogeneous",
+    gravity_model: GravityModel = "homogeneous",
+    trajectory_gravity_model: GravityModel | None = None,
     phase_output: str = "All",
     detection_time: Decimal = Decimal(0),
     absolute_time_offset: Decimal = Decimal(0),
@@ -3072,8 +3112,8 @@ def numerical_differential_interferometer(
 
     if1 = num_phase_with_origin(
         interferometer = interferometer_1,
-        ideal_potential = ideal_potential,
-        ideal_trajectory = ideal_trajectory,
+        gravity_model = gravity_model,
+        trajectory_gravity_model = trajectory_gravity_model,
         init_height = init_height,
         init_velocity = init_velocity,
         phase_output = phase_output,
@@ -3099,8 +3139,8 @@ def numerical_differential_interferometer(
 
     if2 = num_phase_with_origin(
         interferometer = interferometer_2,
-        ideal_potential = ideal_potential,
-        ideal_trajectory = ideal_trajectory,
+        gravity_model = gravity_model,
+        trajectory_gravity_model = trajectory_gravity_model,
         init_height = init_height,
         init_velocity = init_velocity,
         phase_output = phase_output,
@@ -3127,13 +3167,14 @@ def numerical_differential_interferometer(
     return if1 - if2
 
 
+@accept_deprecated_gravity_model_names
 def numerical_same_interferometer_height_difference(
     interferometer: Interferometer,
     height_delta: Decimal,
     init_height: Decimal,
     init_velocity: Decimal,
-    ideal_potential: str = "Homogeneous",
-    ideal_trajectory: str = "Homogeneous",
+    gravity_model: GravityModel = "homogeneous",
+    trajectory_gravity_model: GravityModel | None = None,
     phase_output: str = "All",
     detection_time: Decimal = Decimal(0),
     absolute_time_offset: Decimal = Decimal(0),
@@ -3157,8 +3198,8 @@ def numerical_same_interferometer_height_difference(
 
     if1 = num_phase_with_origin(
         interferometer = interferometer,
-        ideal_potential = ideal_potential,
-        ideal_trajectory = ideal_trajectory,
+        gravity_model = gravity_model,
+        trajectory_gravity_model = trajectory_gravity_model,
         init_height = init_height,
         init_velocity = init_velocity,
         phase_output = phase_output,
@@ -3184,8 +3225,8 @@ def numerical_same_interferometer_height_difference(
 
     if2 = num_phase_with_origin(
         interferometer = interferometer,
-        ideal_potential = ideal_potential,
-        ideal_trajectory = ideal_trajectory,
+        gravity_model = gravity_model,
+        trajectory_gravity_model = trajectory_gravity_model,
         init_height = init_height + height_delta,
         init_velocity = init_velocity,
         phase_output = phase_output,

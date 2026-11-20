@@ -26,7 +26,7 @@ from phase.classes import (
     TestMass as TungstenTestMass,  # Renamed, so that pytest does not try to collect it as a test class.
 )
 from phase.geometries import create_MZI, mach_zehnder
-from phase.gravitational_model import DEFAULT_G, DEFAULT_GRAVITY_GRADIENT
+from phase.gravitational_model import DEFAULT_G, DEFAULT_GRAVITY_GRADIENT, GravityModel
 from phase.laser_phase_noise_model import phase_noise
 from phase.numerical_interferometer import (
     num_phase_with_origin,
@@ -120,8 +120,7 @@ def total_phase(**kwargs: Any) -> Decimal:
     settings: dict[str, Any] = dict(
         initial_height = 0,
         initial_velocity = 10,
-        ideal_potential = "homogeneous",
-        ideal_trajectory = "homogeneous",
+        gravity_model = "homogeneous",
         include_FSL_contribution = False,
         include_Doppler_effect = False,
     )
@@ -167,7 +166,7 @@ def test_photon_trajectory_rejects_unknown_direction():
 @pytest.mark.parametrize("time_step", [Decimal("1e-3"), Decimal("0.5"), Decimal(2)])
 def test_atom_trajectory_is_free_fall(time_step: Decimal) -> None:
     z0, v0 = Decimal("1.5"), Decimal(7)
-    kwargs: dict[str, Any] = dict(start_height = z0, start_velocity = v0, ideal = "homogeneous", time_step = time_step, absolute_time = Decimal(0), additional_acceleration = Decimal(0))
+    kwargs: dict[str, Any] = dict(start_height = z0, start_velocity = v0, model = "homogeneous", time_step = time_step, absolute_time = Decimal(0), additional_acceleration = Decimal(0))
 
     assert ni.atom_trajectory(**kwargs) == z0 + v0 * time_step - DEFAULT_G * time_step ** 2 / 2
     assert ni.atom_velocity(**kwargs) == v0 - DEFAULT_G * time_step
@@ -187,7 +186,7 @@ def test_photon_atom_interaction_time_downwards_photon():
     a, b, c0 = DEFAULT_G / 2, - (c + atom_velocity), laser_height - atom_height
     exact_time = (- b - (b * b - 4 * a * c0).sqrt()) / (2 * a)
 
-    numerical_time = ni.photon_atom_interaction_time(photon_start_height = laser_height, light_direction = "down", target_height = atom_height, target_velocity = atom_velocity, ideal_trajectory = "homogeneous")
+    numerical_time = ni.photon_atom_interaction_time(photon_start_height = laser_height, light_direction = "down", target_height = atom_height, target_velocity = atom_velocity, trajectory_gravity_model = "homogeneous")
 
     assert abs(numerical_time - exact_time) < Decimal("1e-36")
 
@@ -199,7 +198,7 @@ def test_photon_atom_interaction_time_upwards_photon():
     a, b, c0 = DEFAULT_G / 2, c - atom_velocity, mirror_height - atom_height
     exact_time = (- b + (b * b - 4 * a * c0).sqrt()) / (2 * a)
 
-    numerical_time = ni.photon_atom_interaction_time(photon_start_height = mirror_height, light_direction = "up", target_height = atom_height, target_velocity = atom_velocity, ideal_trajectory = "homogeneous")
+    numerical_time = ni.photon_atom_interaction_time(photon_start_height = mirror_height, light_direction = "up", target_height = atom_height, target_velocity = atom_velocity, trajectory_gravity_model = "homogeneous")
 
     assert abs(numerical_time - exact_time) < Decimal("1e-36")
 
@@ -207,7 +206,7 @@ def test_photon_atom_interaction_time_upwards_photon():
 @pytest.mark.parametrize("photon_height, direction", [(Decimal(1), "down"), (Decimal(9), "up")])
 def test_photon_atom_interaction_time_raises_if_photon_already_passed(photon_height, direction):
     with pytest.raises(ni.AtomOutsideBaselineError, match = "cannot reach the atom"):
-        ni.photon_atom_interaction_time(photon_start_height = photon_height, light_direction = direction, target_height = Decimal(5), target_velocity = Decimal(0), ideal_trajectory = "homogeneous")
+        ni.photon_atom_interaction_time(photon_start_height = photon_height, light_direction = direction, target_height = Decimal(5), target_velocity = Decimal(0), trajectory_gravity_model = "homogeneous")
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -266,8 +265,7 @@ def test_single_photon_laser_phase_does_not_depend_on_trajectory(direction: str,
         interferometer = clock_mzi(T = 1, direction = direction),
         initial_height = 0,
         initial_velocity = initial_velocity,
-        ideal_potential = "homogeneous",
-        ideal_trajectory = "homogeneous",
+        gravity_model = "homogeneous",
         include_Doppler_effect = False,
         include_internal_state_changes = True
     )
@@ -497,8 +495,7 @@ def test_only_kick_phase_survives_in_homogeneous_field():
         interferometer = mzi(),
         initial_height = 0,
         initial_velocity = 10,
-        ideal_potential = "homogeneous",
-        ideal_trajectory = "homogeneous",
+        gravity_model = "homogeneous",
         include_FSL_contribution = False,
         include_Doppler_effect = False
     )
@@ -519,7 +516,7 @@ def test_gravity_gradient_correction(initial_height, initial_velocity):
     T = Decimal(1)
     interferometer = mzi(T = T, lower_laser_height = -20, baseline = 40)  # The dropped atoms (v0 = 0) fall to -19.6 m.
     homogeneous = total_phase(interferometer = interferometer, initial_height = initial_height, initial_velocity = initial_velocity)
-    gradient = total_phase(interferometer = interferometer, initial_height = initial_height, initial_velocity = initial_velocity, ideal_potential = "constant gradient", ideal_trajectory = "constant gradient")
+    gradient = total_phase(interferometer = interferometer, initial_height = initial_height, initial_velocity = initial_velocity, gravity_model = "constant gradient")
 
     v_rec = Decimal(scp.hbar) * k_clock / (87 * Decimal(scp.proton_mass))
     expected = k_clock * DEFAULT_GRAVITY_GRADIENT * T ** 2 * (Decimal(initial_height) + (Decimal(initial_velocity) + v_rec / 2) * T - Decimal(7) / 12 * DEFAULT_G * T ** 2)
@@ -541,7 +538,7 @@ The separation phase has to use the output velocities after the last pulse, also
 @pytest.mark.parametrize("detection_time", [Decimal(0), Decimal("0.01")])
 def test_recoil_gravity_gradient_term(detection_time: Decimal) -> None:
     T, n, nucleon_number = Decimal("0.2"), 5, 87
-    settings: dict[str, Any] = dict(initial_velocity = 2, ideal_potential = "constant gradient", ideal_trajectory = "constant gradient", detection_time = detection_time)
+    settings: dict[str, Any] = dict(initial_velocity = 2, gravity_model = "constant gradient", detection_time = detection_time)
 
     light = total_phase(interferometer = mzi(T = T, n = n, nucleon_number = nucleon_number, k_vector = k_raman), **settings)
     heavy = total_phase(interferometer = mzi(T = T, n = n, nucleon_number = nucleon_number * 10 ** 6, k_vector = k_raman), **settings)
@@ -555,8 +552,8 @@ def test_recoil_gravity_gradient_term(detection_time: Decimal) -> None:
 @pytest.mark.parametrize("model", ["homogeneous", "constant gradient"])
 def test_additional_acceleration_shifts_g_estimate(model):
     acceleration = Decimal("1e-3")
-    without = total_phase(interferometer = mzi(), ideal_potential = model, ideal_trajectory = model)
-    with_acceleration = total_phase(interferometer = mzi(), ideal_potential = model, ideal_trajectory = model, add_gravity = acceleration)
+    without = total_phase(interferometer = mzi(), gravity_model = model)
+    with_acceleration = total_phase(interferometer = mzi(), gravity_model = model, add_gravity = acceleration)
 
     shift = g_estimate(phase = with_acceleration - without, n = 1, k = k_clock, T = 1)
 
@@ -568,13 +565,48 @@ Hence the trajectory itself: With an additional acceleration a, the atoms fall a
 @pytest.mark.parametrize("model", ["homogeneous", "constant gradient"])
 def test_additional_acceleration_accelerates_the_atoms(model: str) -> None:
     acceleration, T = Decimal("1e-6"), Decimal(1)
-    settings: dict[str, Any] = dict(interferometer = mzi(T = T), initial_height = 0, initial_velocity = 10, ideal_potential = model, ideal_trajectory = model, include_FSL_contribution = False, include_Doppler_effect = False)
+    settings: dict[str, Any] = dict(interferometer = mzi(T = T), initial_height = 0, initial_velocity = 10, gravity_model = model, include_FSL_contribution = False, include_Doppler_effect = False)
 
     without = numerical_phases(**settings)
     with_acceleration = numerical_phases(add_gravity = acceleration, **settings)
 
     for arm in (3, 4):
         assert relative_deviation(value = with_acceleration[arm][-1][0] - without[arm][-1][0], reference = - acceleration * (2 * T) ** 2 / 2) < 10 ** -5
+
+
+''' gravity_model sets the field for the potential and the trajectories. trajectory_gravity_model only overrides it for the trajectories, which then differ. '''
+def test_trajectory_gravity_model_defaults_to_gravity_model() -> None:
+    settings: dict[str, Any] = dict(interferometer = mzi(), initial_height = 0, initial_velocity = 10, include_FSL_contribution = False, include_Doppler_effect = False)
+
+    default = numerical_phases(gravity_model = "constant gradient", **settings)
+    explicit = numerical_phases(gravity_model = "constant gradient", trajectory_gravity_model = "constant gradient", **settings)
+    unperturbed_trajectories = numerical_phases(gravity_model = "constant gradient", trajectory_gravity_model = "homogeneous", **settings)
+
+    assert default == explicit
+    assert default[3] != unperturbed_trajectories[3]
+
+
+''' The former names ideal_potential and ideal_trajectory still work until version 1.0, with a DeprecationWarning. Both had the default "homogeneous",
+so a former name alone has to give the same result as before, also through the wrappers. '''
+@pytest.mark.parametrize("former, potential, trajectory", [
+    (dict(ideal_potential = "constant gradient"), "constant gradient", "homogeneous"),
+    (dict(ideal_trajectory = "constant gradient"), "homogeneous", "constant gradient"),
+    (dict(ideal_potential = "constant gradient", ideal_trajectory = "constant gradient"), "constant gradient", "constant gradient"),
+])
+def test_former_gravity_model_names_are_deprecated(former: dict[str, Any], potential: GravityModel, trajectory: GravityModel) -> None:
+    settings: dict[str, Any] = dict(interferometer = mzi(), include_FSL_contribution = False, include_Doppler_effect = False)
+    expected = numerical_phases(initial_height = 0, initial_velocity = 10, gravity_model = potential, trajectory_gravity_model = trajectory, **settings)
+
+    with pytest.warns(DeprecationWarning, match = "gravity_model"):
+        assert numerical_phases(initial_height = 0, initial_velocity = 10, **former, **settings) == expected
+    with pytest.warns(DeprecationWarning, match = "gravity_model"):
+        assert ni.num_phase_with_origin(init_height = 0, init_velocity = 10, **former, **settings) == expected[0] + expected[1] + expected[2]
+
+
+def test_former_and_new_gravity_model_names_are_not_mixed() -> None:
+    former: dict[str, Any] = dict(ideal_trajectory = "homogeneous")
+    with pytest.raises(TypeError, match = "not both"):
+        numerical_phases(interferometer = mzi(), initial_height = 0, initial_velocity = 10, gravity_model = "constant gradient", **former)
 
 
 ''' The noise list knows 'Mirror Jitter' and 'Laser Phase'. Unknown entries, e.g. the removed 'Gravity' noise, the former name 'Seismic' of the mirror jitter or typos,
@@ -762,8 +794,7 @@ def test_laser_phase_noise_cancels_in_single_photon_gradiometer() -> None:
         height_delta = Decimal(5),
         init_height = Decimal(0),
         init_velocity = Decimal(10),
-        ideal_potential = "constant gradient",
-        ideal_trajectory = "constant gradient",
+        gravity_model = "constant gradient",
     )
 
     noisy_phase = numerical_same_interferometer_height_difference(random_phases_laser_noise = random_laser_phases(seed = 1), **settings)
@@ -939,8 +970,7 @@ def test_gradiometer_measures_gravity_gradient():
         height_delta = delta_z,
         init_height = Decimal(0),
         init_velocity = Decimal(10),
-        ideal_potential = "constant gradient",
-        ideal_trajectory = "constant gradient",
+        gravity_model = "constant gradient",
         include_FSL_contribution = False,
         include_Doppler_effect = False
     )
@@ -1069,8 +1099,7 @@ def test_gradiometer_measures_the_given_gradient() -> None:
         height_delta = delta_z,
         init_height = Decimal(0),
         init_velocity = Decimal(10),
-        ideal_potential = "constant gradient",
-        ideal_trajectory = "constant gradient",
+        gravity_model = "constant gradient",
         include_FSL_contribution = False,
         include_Doppler_effect = False,
         gravity_gradient = gradient,

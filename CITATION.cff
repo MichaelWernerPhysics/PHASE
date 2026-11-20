@@ -3,7 +3,7 @@ message: "If you use this software, please cite it as below."
 title: "PHASE: Numerical phase shifts of light-pulse atom interferometers"
 version: 0.1.0
 license: MIT
-repository-code: "https://github.com/MicWer94/PHASE"
+repository-code: "https://github.com/MichaelWernerPhysics/PHASE"
 authors:
   - family-names: Werner
     given-names: Michael

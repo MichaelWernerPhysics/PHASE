@@ -40,8 +40,7 @@ phases = numerical_phases(
     interferometer = mzi,
     initial_height = 0,                         # Launched upwards from z = 0 m ...
     initial_velocity = 10,                      # ... with 10 m/s
-    ideal_potential = "constant gradient",
-    ideal_trajectory = "constant gradient",
+    gravity_model = "constant gradient",
 )
 
 total_phase = phases[0] + phases[1] + phases[2]  # Propagation + separation + laser phase in rad
@@ -79,6 +78,8 @@ gradiometers, gravitational waves, laser phase noise, test masses, tides and gra
 - **Laser phase noise of two-photon pulses** is evaluated at one emission time per pulse, the one of the retro-reflected beam. The direct beam is emitted 2 (z_atom - z_mirror) / c later
   and would pick up its own laser phase noise. This delay is neglected.
 
+Trajectories in three dimensions (with the Coriolis and Eötvös effect and wavefront aberrations) and finite pulse durations are planned, see the [roadmap](https://github.com/MichaelWernerPhysics/PHASE/wiki#roadmap).
+
 ## Package layout
 
 | Module | Content |
@@ -96,7 +97,7 @@ gradiometers, gravitational waves, laser phase noise, test masses, tides and gra
 - Michael Werner (<werner@iqo.uni-hannover.de>): main author.
 - Maike Reckermann (Leibniz University Hannover): implementation of the atmospheric gravity gradient noise model.
 
-Contributions are welcome. Please open an [issue](https://github.com/MicWer94/PHASE/issues) or write an e-mail.
+Contributions are welcome. Please open an [issue](https://github.com/MichaelWernerPhysics/PHASE/issues) or write an e-mail.
 
 ## Citation
 
