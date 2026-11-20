@@ -99,7 +99,7 @@ Trajectories in three dimensions (with the Coriolis and Eötvös effect and wave
 - Michael Werner (<werner@iqo.uni-hannover.de>): main author.
 - Maike Reckermann (Leibniz University Hannover): implementation of the atmospheric gravity gradient noise model.
 
-Contributions are welcome. Please open an [issue](https://github.com/MichaelWernerPhysics/PHASE/issues) or write an e-mail.
+Contributions are welcome. The [PHASE Roadmap](https://github.com/users/MichaelWernerPhysics/projects/1) shows the planned work. Please open an [issue](https://github.com/MichaelWernerPhysics/PHASE/issues) or write an e-mail.
 
 ## Citation
 
