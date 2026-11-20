@@ -1,5 +1,7 @@
 # PHASE
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24396681.svg)](https://doi.org/10.5281/zenodo.24396681)
+
 PHASE computes the phase shifts of light-pulse atom interferometers numerically. It propagates both arms of an interferometer through the gravitational field
 with 45-digit `Decimal` precision and returns the propagation, separation and laser phase, without the approximations of the usual analytic derivations.
 
@@ -101,7 +103,8 @@ Contributions are welcome. Please open an [issue](https://github.com/MichaelWern
 
 ## Citation
 
-If you use PHASE in your research, please cite it as given in [CITATION.cff](CITATION.cff).
+If you use PHASE in your research, please cite it as given in [CITATION.cff](CITATION.cff). The DOI [10.5281/zenodo.24396681](https://doi.org/10.5281/zenodo.24396681) refers to all versions of PHASE and resolves to the latest one.
+To cite the exact version you used, take its DOI from the [Zenodo record](https://doi.org/10.5281/zenodo.24396681).
 
 ## References
 

@@ -9,6 +9,7 @@ abstract: >-
   laser phase noise, mirror jitter, gravity gradient noise and test masses.
 version: 0.1.0
 date-released: 2026-11-20
+doi: 10.5281/zenodo.24396681
 keywords:
   - atom interferometry
   - light-pulse atom interferometer
