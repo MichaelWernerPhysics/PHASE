@@ -1,13 +1,29 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "PHASE: Numerical phase shifts of light-pulse atom interferometers"
+abstract: >-
+  PHASE computes the phase shifts of light-pulse atom interferometers numerically. It propagates both arms of an
+  interferometer through the gravitational field with 45-digit Decimal precision and returns the propagation, separation
+  and laser phase, without the approximations of the usual analytic derivations. It covers arbitrary pulse sequences,
+  two-photon and single photon transitions, the finite speed of light, and signals and noise such as gravitational waves,
+  laser phase noise, mirror jitter, gravity gradient noise and test masses.
 version: 0.1.0
+date-released: 2026-11-20
+keywords:
+  - atom interferometry
+  - light-pulse atom interferometer
+  - phase shift
+  - gravimetry
+  - gravity gradiometry
+  - gravitational waves
+  - numerical simulation
 license: MIT
 repository-code: "https://github.com/MichaelWernerPhysics/PHASE"
 authors:
   - family-names: Werner
     given-names: Michael
     affiliation: "Leibniz Universität Hannover"
+    orcid: "https://orcid.org/0009-0008-3183-4426"
 identifiers:
   - type: doi
     value: 10.25835/jnh3eryx
