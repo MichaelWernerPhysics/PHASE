@@ -33,7 +33,7 @@ class Interferometer:
             lower_internal_state: list[str],
             # List of interaction types with each laser pulse. Either "Single_Photon" or "Two_Photon".
             interaction_type: list[str],
-            # Dimensionless detuning parameters which are added to the
+            # Dimensionless detunings: pulse i scales the momentum transfer in both arms by (1 + detunings[i]).
             detunings: Sequence[int | float | Decimal],
             # k-vector in 1/m, no default. Single photon pulses: the k-vector of the photon. Two-photon pulses: the k-vectors of both beams, [k_1, k_2] with k_eff = k_1 + k_2,
             # e.g. [k / 2, k / 2] with k = 4 pi / 780 nm for the Raman transition of Rubidium. For single photon pulses with the finite speed of light, k c has to equal clock_frequency.
